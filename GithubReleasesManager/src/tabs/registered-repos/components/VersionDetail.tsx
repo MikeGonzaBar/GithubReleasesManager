@@ -1,111 +1,130 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { save } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import "./VersionDetail.css";
 import { saveInstalledApp } from "../../../shared/utils/storage";
 import { getSuggestedDownloadPath, ensureFolderStructure } from "../../../shared/utils/download";
-import type { InstalledApp } from "../../../types";
-
-interface Release {
-  id: number;
-  version: string;
-  releaseDate: string;
-  isPrerelease: boolean;
-  isDraft: boolean;
-}
-
-interface Repository {
-  id: number;
-  owner: string;
-  name: string;
-  latestVersion: string;
-  description: string | null;
-}
+import { fetchReleaseCommits } from "../../../shared/utils/github";
+import type { InstalledApp, Release, Commit, ReleaseAsset, RegisteredRepo } from "../../../types";
 
 interface VersionDetailProps {
-  repository: Repository;
+  repository: RegisteredRepo;
   release: Release;
   onBack: () => void;
+}
+
+interface DownloadProgress {
+  file_name: string;
+  downloaded: number;
+  total: number;
+  progress: number;
 }
 
 export default function VersionDetail({ repository, release, onBack }: VersionDetailProps) {
   const [commitsOpen, setCommitsOpen] = useState(false);
   const [downloadsOpen, setDownloadsOpen] = useState(false);
   const [downloading, setDownloading] = useState<string | null>(null);
-  // Dummy data for commit changes and download files
-  const commitChanges = [
-    {
-      hash: "a1b2c3d",
-      message: "Fix critical bug in authentication system",
-      author: "developer1",
-      date: "2024-01-14",
-    },
-    {
-      hash: "e4f5g6h",
-      message: "Add new feature for user preferences",
-      author: "developer2",
-      date: "2024-01-13",
-    },
-    {
-      hash: "i7j8k9l",
-      message: "Update dependencies and improve performance",
-      author: "developer1",
-      date: "2024-01-12",
-    },
-  ];
+  const [downloadProgress, setDownloadProgress] = useState<{ [key: string]: DownloadProgress }>({});
+  const [commits, setCommits] = useState<Commit[]>([]);
+  const [commitsLoading, setCommitsLoading] = useState(false);
+  const [commitsError, setCommitsError] = useState<string | null>(null);
 
-  const downloadFiles = [
-    {
-      name: "app-windows-x64.exe",
-      size: "15.2 MB",
-      type: "executable",
-      url: "https://example.com/downloads/app-windows-x64.exe", // Placeholder - replace with real GitHub release asset URL
-    },
-    {
-      name: "app-linux-x64.tar.gz",
-      size: "12.8 MB",
-      type: "archive",
-      url: "https://example.com/downloads/app-linux-x64.tar.gz",
-    },
-    {
-      name: "app-macos-x64.dmg",
-      size: "14.5 MB",
-      type: "disk-image",
-      url: "https://example.com/downloads/app-macos-x64.dmg",
-    },
-    {
-      name: "source-code.zip",
-      size: "8.3 MB",
-      type: "source",
-      url: "https://example.com/downloads/source-code.zip",
-    },
-  ];
+  // Listen for download progress events
+  useEffect(() => {
+    const setupProgressListener = async () => {
+      const unlisten = await listen<DownloadProgress>("download-progress", (event) => {
+        const progress = event.payload;
+        setDownloadProgress((prev) => ({
+          ...prev,
+          [progress.file_name]: progress,
+        }));
+      });
+      return unlisten;
+    };
 
-  const handleDownload = async (fileName: string) => {
+    let unlistenFn: (() => void) | undefined;
+    setupProgressListener().then((fn) => {
+      unlistenFn = fn;
+    });
+
+    return () => {
+      if (unlistenFn) {
+        unlistenFn();
+      }
+    };
+  }, []);
+
+  // Fetch commits when commits section is opened
+  useEffect(() => {
+    if (commitsOpen && commits.length === 0 && !commitsLoading && !commitsError) {
+      loadCommits();
+    }
+  }, [commitsOpen]);
+
+  const loadCommits = async () => {
     try {
-      setDownloading(fileName);
-      
-      // Generate suggested path with folder structure: {owner}-{repo}/{filename}-{version}.txt
-      const defaultFileName = fileName.replace(/\.[^/.]+$/, "") + ".txt";
+      setCommitsLoading(true);
+      setCommitsError(null);
+      const fetchedCommits = await fetchReleaseCommits(
+        repository.owner,
+        repository.name,
+        release.version
+      );
+      setCommits(fetchedCommits);
+    } catch (err) {
+      setCommitsError(err instanceof Error ? err.message : "Failed to load commits");
+    } finally {
+      setCommitsLoading(false);
+    }
+  };
+
+  // Use assets from the release object
+  const downloadFiles: ReleaseAsset[] = release.assets || [];
+
+  // Helper function to format bytes
+  const formatBytes = (bytes: number): string => {
+    if (bytes === 0) return "0 B";
+    const k = 1024;
+    const sizes = ["B", "KB", "MB", "GB"];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return `${(bytes / Math.pow(k, i)).toFixed(2)} ${sizes[i]}`;
+  };
+
+  const handleDownload = async (asset: ReleaseAsset) => {
+    try {
+      setDownloading(asset.name);
+      setDownloadProgress((prev) => ({
+        ...prev,
+        [asset.name]: { file_name: asset.name, downloaded: 0, total: asset.size, progress: 0 },
+      }));
+
+      // Get file extension from asset name
+      const fileExtension = asset.name.split('.').pop() || '';
       const suggestedPath = getSuggestedDownloadPath(
         repository.owner,
         repository.name,
-        defaultFileName,
+        asset.name,
         release.version
       );
-      
-      // Open file save dialog with suggested folder structure
+
+      // Open file save dialog
       const filePath = await save({
         defaultPath: suggestedPath,
-        filters: [{
-          name: "Text Files",
-          extensions: ["txt"]
-        }]
+        filters: fileExtension ? [{
+          name: "All Files",
+          extensions: [fileExtension]
+        }] : undefined
       });
 
       if (!filePath) {
         // User cancelled
         setDownloading(null);
+        setDownloadProgress((prev) => {
+          const newProgress = { ...prev };
+          delete newProgress[asset.name];
+          return newProgress;
+        });
         return;
       }
 
@@ -116,13 +135,11 @@ export default function VersionDetail({ repository, release, onBack }: VersionDe
         repository.name
       );
 
-      // Create the text file with download information
-      await invoke<string>("create_download_file", {
+      // Download the actual file with progress tracking
+      await invoke<string>("download_file", {
+        url: asset.url,
         filePath: finalPath,
-        repoOwner: repository.owner,
-        repoName: repository.name,
-        version: release.version,
-        fileName: fileName,
+        fileName: asset.name,
       });
 
       // Save installed app information
@@ -137,10 +154,22 @@ export default function VersionDetail({ repository, release, onBack }: VersionDe
 
       await saveInstalledApp(installedApp);
 
+      // Clear progress
+      setDownloadProgress((prev) => {
+        const newProgress = { ...prev };
+        delete newProgress[asset.name];
+        return newProgress;
+      });
+
       alert(`Download completed! File saved to: ${finalPath}`);
     } catch (error) {
       console.error("Download failed:", error);
       alert(`Download failed: ${error}`);
+      setDownloadProgress((prev) => {
+        const newProgress = { ...prev };
+        delete newProgress[asset.name];
+        return newProgress;
+      });
     } finally {
       setDownloading(null);
     }
@@ -170,13 +199,17 @@ export default function VersionDetail({ repository, release, onBack }: VersionDe
             </button>
             <div className={`section-content ${commitsOpen ? "open" : ""}`}>
               <div className="commits-list">
-                {commitChanges.length === 0 ? (
+                {commitsLoading ? (
+                  <p className="empty-message">Loading commits...</p>
+                ) : commitsError ? (
+                  <p className="empty-message error">{commitsError}</p>
+                ) : commits.length === 0 ? (
                   <p className="empty-message">No commit information available.</p>
                 ) : (
-                  commitChanges.map((commit, index) => (
-                    <div key={index} className="commit-item">
+                  commits.map((commit, index) => (
+                    <div key={`${commit.sha}-${index}`} className="commit-item">
                       <div className="commit-header">
-                        <span className="commit-hash">{commit.hash.substring(0, 7)}</span>
+                        <span className="commit-hash">{commit.sha}</span>
                         <span className="commit-author">by {commit.author}</span>
                         <span className="commit-date">{commit.date}</span>
                       </div>
@@ -201,21 +234,39 @@ export default function VersionDetail({ repository, release, onBack }: VersionDe
                 {downloadFiles.length === 0 ? (
                   <p className="empty-message">No files available for download.</p>
                 ) : (
-                  downloadFiles.map((file, index) => (
-                    <div key={index} className="download-item">
-                      <div className="file-info">
-                        <span className="file-name">{file.name}</span>
-                        <span className="file-size">{file.size}</span>
+                  downloadFiles.map((asset) => {
+                    const progress = downloadProgress[asset.name];
+                    const isDownloading = downloading === asset.name;
+
+                    return (
+                      <div key={asset.id} className="download-item">
+                        <div className="file-info">
+                          <span className="file-name">{asset.name}</span>
+                          <span className="file-size">{asset.size_formatted}</span>
+                          {isDownloading && progress && (
+                            <div className="download-progress-container">
+                              <div className="download-progress-bar">
+                                <div
+                                  className="download-progress-fill"
+                                  style={{ '--progress': `${progress.progress}%` } as React.CSSProperties}
+                                />
+                              </div>
+                              <span className="download-progress-text">
+                                {progress.progress}% ({formatBytes(progress.downloaded)} / {formatBytes(progress.total)})
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                        <button
+                          className="download-button"
+                          onClick={() => handleDownload(asset)}
+                          disabled={isDownloading}
+                        >
+                          {isDownloading ? "Downloading..." : "Download"}
+                        </button>
                       </div>
-                      <button
-                        className="download-button"
-                        onClick={() => handleDownload(file.name)}
-                        disabled={downloading === file.name}
-                      >
-                        {downloading === file.name ? "Downloading..." : "Download"}
-                      </button>
-                    </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
             </div>

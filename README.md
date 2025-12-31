@@ -4,11 +4,14 @@ A cross-platform desktop application built with Tauri, React, and TypeScript to 
 
 ## Features
 
-- **Repository Management**: Add repositories to your watchlist and track their releases
-- **Version Tracking**: Monitor the latest versions of releases for watched repositories
+- **Repository Management**: Add repositories to your watchlist via GitHub URL and track their releases
+- **Real-time GitHub Integration**: Fetch live data from GitHub API including releases, commits, and assets
+- **Version Tracking**: Monitor the latest versions of releases for watched repositories with automatic comparison
 - **Installed Apps Tracking**: Keep track of all downloaded applications with their versions and locations
-- **Release Details**: View commit changes and available download files for each release
-- **Download Management**: Download files with automatic tracking of installation details
+- **Release Details**: View commit history with hashes, authors, and messages for each release
+- **File Downloads**: Download release assets directly from GitHub with real-time progress tracking
+- **Progress Indicators**: Visual progress bars showing download percentage and transfer speed
+- **Smart Version Comparison**: Automatic detection of updates using semantic versioning
 
 ## Tech Stack
 
@@ -19,7 +22,7 @@ A cross-platform desktop application built with Tauri, React, and TypeScript to 
 
 ## Project Structure
 
-```
+```text
 GithubReleasesManager/
 ├── src/                          # Frontend React code
 │   ├── shared/                   # Shared code used across multiple tabs
@@ -29,12 +32,15 @@ GithubReleasesManager/
 │   │   └── utils/                # Shared utility functions
 │   │       ├── download.ts       # Download path utilities
 │   │       ├── repos.ts          # Repository management utilities
-│   │       └── storage.ts        # Storage operations
+│   │       ├── storage.ts        # Storage operations
+│   │       └── github.ts         # GitHub API integration utilities
 │   ├── tabs/                     # Tab-specific code
 │   │   ├── registered-repos/     # Registered Repositories tab
 │   │   │   └── components/
 │   │   │       ├── RegisteredRepos.tsx  # Repository list view
 │   │   │       ├── RegisteredRepos.css
+│   │   │       ├── AddRepoDialog.tsx    # Add repository dialog
+│   │   │       ├── AddRepoDialog.css
 │   │   │       ├── RepositoryDetail.tsx # Releases list view
 │   │   │       ├── RepositoryDetail.css
 │   │   │       ├── VersionDetail.tsx    # Version details with commits & downloads
@@ -53,9 +59,10 @@ GithubReleasesManager/
 │   └── main.tsx                  # React entry point
 ├── src-tauri/                    # Rust backend code
 │   ├── src/
-│   │   └── lib.rs                # Tauri commands and storage logic
+│   │   └── lib.rs                # Tauri commands, GitHub API, and storage logic
 │   ├── Cargo.toml                # Rust dependencies
-│   └── capabilities/             # Tauri permissions
+│   ├── capabilities/             # Tauri permissions
+│   └── icons/                    # Application icons
 └── README.md                     # This file
 ```
 
@@ -94,8 +101,10 @@ GithubReleasesManager/
 ### Registered Repositories Tab
 
 - View all repositories in your watchlist
+- Add new repositories by entering a GitHub URL (supports multiple formats: `https://github.com/owner/repo`, `owner/repo`, etc.)
 - Click on a repository to see available versions
-- Search repositories by name
+- Search repositories by name, owner, or description
+- Automatically fetches latest version information from GitHub
 
 ### Installed Apps Tab
 
@@ -105,10 +114,11 @@ GithubReleasesManager/
 
 ### Repository Details
 
-- Click any repository to view its releases
+- Click any repository to view its releases (fetched live from GitHub API)
+- Releases are sorted by date (newest first)
 - Click a release version to see:
-  - **Commit Changes**: View commit history with hashes, authors, and messages
-  - **Available Files**: Download files (currently creates text files with download info)
+  - **Commit Changes**: View commit history with hashes, authors, and messages (fetched from GitHub)
+  - **Available Files**: View all release assets with file sizes and download directly from GitHub
 
 ### Downloading Files
 
@@ -116,7 +126,9 @@ GithubReleasesManager/
 2. Expand "Available Files" section
 3. Click "Download" on any file
 4. Choose save location in the file dialog
-5. The app automatically tracks the download in "Installed Apps"
+5. Watch the real-time progress bar showing download percentage and bytes transferred
+6. The actual file is downloaded from GitHub (not a placeholder)
+7. The app automatically tracks the download in "Installed Apps"
 
 ## Data Storage
 
@@ -128,22 +140,23 @@ The application stores tracking data in platform-specific app data directories:
 - **macOS**: `~/Library/Application Support/com.githubreleasesmanager.app/`
 - **Linux**: `~/.local/share/com.githubreleasesmanager.app/`
 
-**File**: `installed_apps.json` - Contains all installed app information including:
+**Files**:
 
-- Repository owner and name
-- Version downloaded
-- Description/info
-- Download path (where user saved the file)
-- Installation date
+- `installed_apps.json` - Contains all installed app information including:
+  - Repository owner and name
+  - Version downloaded
+  - Description/info
+  - Download path (where user saved the file)
+  - Installation date
+- `registered_repos.json` - Contains all registered repositories including:
+  - Repository owner and name
+  - Latest version
+  - Description
+  - Date added
 
 ### Downloaded Files
 
-Downloaded files are saved to the location selected by the user via the file save dialog. Currently, downloads create text files containing:
-
-- Repository information
-- Version
-- File name
-- Download timestamp
+Downloaded files are saved to the location selected by the user via the file save dialog. Files are downloaded directly from GitHub release assets, preserving the original file format and content.
 
 ## Development
 
@@ -159,10 +172,17 @@ Downloaded files are saved to the location selected by the user via the file sav
 - `npm run tauri build` - Build production app
 - `npm run build` - Build frontend only
 
-## Current Status
+## GitHub API Integration
 
-⚠️ **Note**: The application currently uses dummy data for demonstration purposes. Integration with the GitHub API is planned for future development.
+The application uses the GitHub REST API v3 to fetch real-time data:
 
-## License
+- **Repository Information**: Fetches repository metadata including description
+- **Releases**: Retrieves all releases with tags, dates, and descriptions
+- **Commits**: Fetches commit history for each release
+- **Assets**: Downloads release files directly from GitHub
 
-[Add your license here]
+### Rate Limits
+
+- **Without authentication**: 60 requests per hour per IP address
+
+The app works without a GitHub account for public repositories. Authentication is optional and only needed for higher rate limits or private repository access.

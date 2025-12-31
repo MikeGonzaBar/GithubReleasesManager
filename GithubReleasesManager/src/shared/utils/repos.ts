@@ -1,46 +1,41 @@
 // Utility for registered repositories
-// TODO: Replace with actual storage when implementing repo management
+import { invoke } from '@tauri-apps/api/core';
+import type { RegisteredRepo } from '../../types';
 
-export interface RegisteredRepo {
-  id: number;
-  owner: string;
-  name: string;
-  latestVersion: string;
-  description: string | null;
+// Load registered repositories from storage
+export async function loadRegisteredRepos(): Promise<RegisteredRepo[]> {
+  try {
+    return await invoke<RegisteredRepo[]>('load_registered_repos');
+  } catch (error) {
+    console.error('Failed to load registered repos:', error);
+    return [];
+  }
 }
 
-// Get registered repositories (currently returns dummy data)
-export function getRegisteredRepos(): RegisteredRepo[] {
-  return [
-    {
-      id: 1,
-      owner: "owner1",
-      name: "repo1",
-      latestVersion: "v1.2.3",
-      description: "A powerful tool for managing GitHub releases and tracking application updates.",
-    },
-    {
-      id: 2,
-      owner: "owner2",
-      name: "repo2",
-      latestVersion: "v2.0.0",
-      description: null,
-    },
-    {
-      id: 3,
-      owner: "owner3",
-      name: "repo3",
-      latestVersion: "v3.1.5",
-      description: "An open-source project that helps developers manage their workflow efficiently.",
-    },
-  ];
+// Save a registered repository to storage
+export async function saveRegisteredRepo(repo: RegisteredRepo): Promise<void> {
+  try {
+    await invoke('save_registered_repo', { repo });
+  } catch (error) {
+    console.error('Failed to save registered repo:', error);
+    throw error;
+  }
+}
+
+// Delete a registered repository
+export async function deleteRegisteredRepo(owner: string, name: string): Promise<void> {
+  try {
+    await invoke('delete_registered_repo', { owner, name });
+  } catch (error) {
+    console.error('Failed to delete registered repo:', error);
+    throw error;
+  }
 }
 
 // Find a registered repo by owner and name
-export function findRegisteredRepo(owner: string, name: string): RegisteredRepo | undefined {
-  return getRegisteredRepos().find(
-    (repo) => repo.owner === owner && repo.name === name
-  );
+export async function findRegisteredRepo(owner: string, name: string): Promise<RegisteredRepo | undefined> {
+  const repos = await loadRegisteredRepos();
+  return repos.find((repo) => repo.owner === owner && repo.name === name);
 }
 
 // Parse version string into components
@@ -55,22 +50,22 @@ interface VersionParts {
 function parseVersion(version: string): VersionParts {
   // Remove 'v' prefix if present
   let clean = version.replace(/^v/i, "").trim();
-  
+
   // Split version and pre-release parts
   const preReleaseMatch = clean.match(/^(.+?)[-+](.+)$/);
   const versionPart = preReleaseMatch ? preReleaseMatch[1] : clean;
   const preReleasePart = preReleaseMatch ? preReleaseMatch[2] : null;
-  
+
   // Split version into major.minor.patch
   const parts = versionPart.split(".").map(p => p.trim());
-  
+
   const major = parseInt(parts[0] || "0", 10) || 0;
   const minor = parseInt(parts[1] || "0", 10) || 0;
   const patch = parseInt(parts[2] || "0", 10) || 0;
-  
+
   let preRelease: string | undefined;
   let preReleaseNumber: number | undefined;
-  
+
   if (preReleasePart) {
     // Try to extract number from pre-release (e.g., "beta1" -> "beta", 1)
     const preReleaseNumMatch = preReleasePart.match(/^([a-zA-Z]+)(\d+)$/i);
@@ -81,7 +76,7 @@ function parseVersion(version: string): VersionParts {
       preRelease = preReleasePart.toLowerCase();
     }
   }
-  
+
   return { major, minor, patch, preRelease, preReleaseNumber };
 }
 
@@ -90,30 +85,30 @@ function parseVersion(version: string): VersionParts {
 export function compareVersions(v1: string, v2: string): number {
   const ver1 = parseVersion(v1);
   const ver2 = parseVersion(v2);
-  
+
   // Compare major version
   if (ver1.major > ver2.major) return 1;
   if (ver1.major < ver2.major) return -1;
-  
+
   // Compare minor version
   if (ver1.minor > ver2.minor) return 1;
   if (ver1.minor < ver2.minor) return -1;
-  
+
   // Compare patch version
   if (ver1.patch > ver2.patch) return 1;
   if (ver1.patch < ver2.patch) return -1;
-  
+
   // If versions are equal, compare pre-release tags
   // A version without a pre-release is greater than one with a pre-release
   if (!ver1.preRelease && ver2.preRelease) return 1;
   if (ver1.preRelease && !ver2.preRelease) return -1;
-  
+
   // Both have pre-release tags
   if (ver1.preRelease && ver2.preRelease) {
     // Compare pre-release identifiers
     const pre1 = ver1.preRelease;
     const pre2 = ver2.preRelease;
-    
+
     // Common pre-release order: alpha < beta < rc < (none)
     const preReleaseOrder: { [key: string]: number } = {
       "alpha": 1,
@@ -122,25 +117,25 @@ export function compareVersions(v1: string, v2: string): number {
       "pre": 2,
       "preview": 2,
     };
-    
+
     const order1 = preReleaseOrder[pre1] || 0;
     const order2 = preReleaseOrder[pre2] || 0;
-    
+
     if (order1 !== order2) {
       return order1 > order2 ? 1 : -1;
     }
-    
+
     // If same type, compare numbers if available
     if (ver1.preReleaseNumber !== undefined && ver2.preReleaseNumber !== undefined) {
       if (ver1.preReleaseNumber > ver2.preReleaseNumber) return 1;
       if (ver1.preReleaseNumber < ver2.preReleaseNumber) return -1;
     }
-    
+
     // String comparison as fallback
     if (pre1 > pre2) return 1;
     if (pre1 < pre2) return -1;
   }
-  
+
   return 0;
 }
 

@@ -76,6 +76,10 @@
   color: var(--text-secondary);
 }
 
+.empty-state.error {
+  color: #dc3545;
+}
+
 .release-item {
   display: flex;
   justify-content: space-between;

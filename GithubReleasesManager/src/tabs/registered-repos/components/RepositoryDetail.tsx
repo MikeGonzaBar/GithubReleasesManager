@@ -1,62 +1,43 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import "./RepositoryDetail.css";
 import VersionDetail from "./VersionDetail";
-
-interface Release {
-  id: number;
-  version: string;
-  releaseDate: string;
-  isPrerelease: boolean;
-  isDraft: boolean;
-}
-
-interface Repository {
-  id: number;
-  owner: string;
-  name: string;
-  latestVersion: string;
-  description: string | null;
-}
+import { fetchReleases } from "../../../shared/utils/github";
+import type { Release, RegisteredRepo } from "../../../types";
 
 interface RepositoryDetailProps {
-  repository: Repository;
+  repository: RegisteredRepo;
   onBack: () => void;
 }
 
 export default function RepositoryDetail({ repository, onBack }: RepositoryDetailProps) {
   const [selectedVersion, setSelectedVersion] = useState<Release | null>(null);
+  const [releases, setReleases] = useState<Release[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  // Dummy releases data
-  const releases: Release[] = [
-    {
-      id: 1,
-      version: "v1.2.3",
-      releaseDate: "2024-01-15",
-      isPrerelease: false,
-      isDraft: false,
-    },
-    {
-      id: 2,
-      version: "v1.2.2",
-      releaseDate: "2024-01-10",
-      isPrerelease: false,
-      isDraft: false,
-    },
-    {
-      id: 3,
-      version: "v1.2.1",
-      releaseDate: "2024-01-05",
-      isPrerelease: false,
-      isDraft: false,
-    },
-    {
-      id: 4,
-      version: "v1.2.0-beta",
-      releaseDate: "2024-01-01",
-      isPrerelease: true,
-      isDraft: false,
-    },
-  ];
+  useEffect(() => {
+    loadReleases();
+  }, [repository.owner, repository.name]);
+
+  const loadReleases = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const fetchedReleases = await fetchReleases(repository.owner, repository.name);
+      // Sort by date (newest first) - releases are already sorted by GitHub API, but filter out drafts
+      const sortedReleases = fetchedReleases
+        .filter((r) => !r.is_draft) // Hide draft releases from main list
+        .sort((a, b) => {
+          // Sort by date descending (newest first)
+          return b.release_date.localeCompare(a.release_date);
+        });
+      setReleases(sortedReleases);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load releases");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   if (selectedVersion) {
     return (
@@ -79,36 +60,46 @@ export default function RepositoryDetail({ repository, onBack }: RepositoryDetai
 
       <div className="detail-content">
         <h3 className="section-title">Available Versions</h3>
-        
-        <div className="releases-list">
-          {releases.length === 0 ? (
-            <div className="empty-state">
-              <p>No releases available for this repository.</p>
-            </div>
-          ) : (
-            releases.map((release) => (
-              <div
-                key={release.id}
-                className="release-item"
-                onClick={() => setSelectedVersion(release)}
-              >
-                <div className="release-info">
-                  <div className="release-version-row">
-                    <span className="release-version">{release.version}</span>
-                    {release.isPrerelease && (
-                      <span className="release-badge prerelease">Pre-release</span>
-                    )}
-                    {release.isDraft && (
-                      <span className="release-badge draft">Draft</span>
-                    )}
-                  </div>
-                  <span className="release-date">Released: {release.releaseDate}</span>
-                </div>
-                <span className="release-arrow">→</span>
+
+        {loading ? (
+          <div className="empty-state">
+            <p>Loading releases...</p>
+          </div>
+        ) : error ? (
+          <div className="empty-state error">
+            <p>{error}</p>
+          </div>
+        ) : (
+          <div className="releases-list">
+            {releases.length === 0 ? (
+              <div className="empty-state">
+                <p>No releases available for this repository.</p>
               </div>
-            ))
-          )}
-        </div>
+            ) : (
+              releases.map((release) => (
+                <div
+                  key={release.id}
+                  className="release-item"
+                  onClick={() => setSelectedVersion(release)}
+                >
+                  <div className="release-info">
+                    <div className="release-version-row">
+                      <span className="release-version">{release.version}</span>
+                      {release.is_prerelease && (
+                        <span className="release-badge prerelease">Pre-release</span>
+                      )}
+                      {release.is_draft && (
+                        <span className="release-badge draft">Draft</span>
+                      )}
+                    </div>
+                    <span className="release-date">Released: {release.release_date}</span>
+                  </div>
+                  <span className="release-arrow">→</span>
+                </div>
+              ))
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

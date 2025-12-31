@@ -3,12 +3,13 @@ import { save, ask } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
 import "./InstalledApps.css";
 import { loadInstalledApps, saveInstalledApp } from "../../../shared/utils/storage";
-import { findRegisteredRepo, isVersionNewer } from "../../../shared/utils/repos";
+import { loadRegisteredRepos, isVersionNewer } from "../../../shared/utils/repos";
 import { getSuggestedDownloadPath, ensureFolderStructure } from "../../../shared/utils/download";
-import type { InstalledApp } from "../../../types";
+import type { InstalledApp, RegisteredRepo } from "../../../types";
 
 export default function InstalledApps() {
   const [apps, setApps] = useState<InstalledApp[]>([]);
+  const [registeredRepos, setRegisteredRepos] = useState<RegisteredRepo[]>([]);
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
@@ -16,8 +17,12 @@ export default function InstalledApps() {
   const loadApps = async () => {
     try {
       setLoading(true);
-      const installedApps = await loadInstalledApps();
+      const [installedApps, repos] = await Promise.all([
+        loadInstalledApps(),
+        loadRegisteredRepos()
+      ]);
       setApps(installedApps);
+      setRegisteredRepos(repos);
     } catch (error) {
       console.error("Failed to load installed apps:", error);
     } finally {
@@ -28,9 +33,11 @@ export default function InstalledApps() {
   const handleUpdate = async (app: InstalledApp, latestVersion: string) => {
     try {
       setUpdating(`${app.repo_owner}/${app.repo_name}`);
-      
+
       // Get the registered repo to get description
-      const registeredRepo = findRegisteredRepo(app.repo_owner, app.repo_name);
+      const registeredRepo = registeredRepos.find(
+        r => r.owner === app.repo_owner && r.name === app.repo_name
+      );
       if (!registeredRepo) {
         alert("Repository not found in registered repos.");
         return;
@@ -44,7 +51,7 @@ export default function InstalledApps() {
         defaultFileName,
         latestVersion
       );
-      
+
       // Open file save dialog with suggested folder structure
       const newFilePath = await save({
         defaultPath: suggestedPath,
@@ -122,7 +129,7 @@ export default function InstalledApps() {
 
       // Reload apps to show updated list
       await loadApps();
-      
+
       alert("Update completed successfully!");
     } catch (error) {
       console.error("Update failed:", error);
@@ -149,7 +156,7 @@ export default function InstalledApps() {
 
     try {
       setDeleting(`${app.repo_owner}/${app.repo_name}-${app.version}`);
-      
+
       await invoke("delete_installed_app", {
         repoOwner: app.repo_owner,
         repoName: app.repo_name,
@@ -158,7 +165,7 @@ export default function InstalledApps() {
 
       // Reload apps to show updated list
       await loadApps();
-      
+
       alert("App deleted successfully!");
     } catch (error) {
       console.error("Delete failed:", error);
@@ -195,11 +202,14 @@ export default function InstalledApps() {
         ) : (
           apps.map((app, index) => {
             // Find the registered repo to get latest version
-            const registeredRepo = findRegisteredRepo(app.repo_owner, app.repo_name);
-            const latestVersion = registeredRepo?.latestVersion || app.version;
-            const hasUpdate = registeredRepo 
-              ? isVersionNewer(registeredRepo.latestVersion, app.version)
+            const registeredRepo = registeredRepos.find(
+              r => r.owner === app.repo_owner && r.name === app.repo_name
+            );
+            const latestVersion = registeredRepo?.latest_version || app.version;
+            const hasUpdate = registeredRepo
+              ? isVersionNewer(registeredRepo.latest_version, app.version)
               : false;
+            const versionsMatch = app.version === latestVersion;
 
             return (
               <div key={index} className="app-card">
@@ -211,9 +221,13 @@ export default function InstalledApps() {
                   <div className="version-info">
                     <span className="version-label">Installed:</span>
                     <span className="version-value">{app.version}</span>
-                    <span className="version-separator">→</span>
-                    <span className="version-label">Latest:</span>
-                    <span className="version-value">{latestVersion}</span>
+                    {!versionsMatch && (
+                      <>
+                        <span className="version-separator">→</span>
+                        <span className="version-label">Latest:</span>
+                        <span className="version-value">{latestVersion}</span>
+                      </>
+                    )}
                   </div>
                   <p className="download-path">Location: {app.download_path}</p>
                 </div>
