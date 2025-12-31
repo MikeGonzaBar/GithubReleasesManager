@@ -1,0 +1,35 @@
+{
+  // Git configuration
+  "git.enabled": true,
+  "git.autoRepositoryDetection": true,
+  "git.confirmSync": false,
+  "git.autofetch": true,
+  "git.autofetchPeriod": 180,
+  
+  // Use Windows credential manager for Git authentication
+  // This works with the git config --global credential.helper manager-core we set earlier
+  "git.useIntegratedTerminal": true,
+  
+  // Git authentication - set to false to use Windows Credential Manager
+  "git.terminalAuthentication": false,
+  
+  // Git path (optional - VS Code will find it automatically)
+  // "git.path": "C:\\Program Files\\Git\\cmd\\git.exe",
+  
+  // File exclusions from search
+  "files.exclude": {
+    "**/node_modules": true,
+    "**/dist": true,
+    "**/target": true,
+    "**/.git": false
+  },
+  
+  // Search exclusions
+  "search.exclude": {
+    "**/node_modules": true,
+    "**/dist": true,
+    "**/target": true,
+    "**/Cargo.lock": true
+  }
+}
+
