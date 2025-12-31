@@ -71,17 +71,20 @@ GithubReleasesManager/
 
 1. Clone the repository
 2. Install dependencies:
+
    ```bash
    cd GithubReleasesManager
    npm install
    ```
 
 3. Run in development mode:
+
    ```bash
    npm run tauri dev
    ```
 
 4. Build for production:
+
    ```bash
    npm run tauri build
    ```
@@ -89,22 +92,26 @@ GithubReleasesManager/
 ## Usage
 
 ### Registered Repositories Tab
+
 - View all repositories in your watchlist
 - Click on a repository to see available versions
 - Search repositories by name
 
 ### Installed Apps Tab
+
 - View all downloaded applications
 - See installed version vs latest version
 - Track download locations
 
 ### Repository Details
+
 - Click any repository to view its releases
 - Click a release version to see:
   - **Commit Changes**: View commit history with hashes, authors, and messages
   - **Available Files**: Download files (currently creates text files with download info)
 
 ### Downloading Files
+
 1. Navigate to a repository → Select a version
 2. Expand "Available Files" section
 3. Click "Download" on any file
@@ -122,6 +129,7 @@ The application stores tracking data in platform-specific app data directories:
 - **Linux**: `~/.local/share/com.githubreleasesmanager.app/`
 
 **File**: `installed_apps.json` - Contains all installed app information including:
+
 - Repository owner and name
 - Version downloaded
 - Description/info
@@ -131,6 +139,7 @@ The application stores tracking data in platform-specific app data directories:
 ### Downloaded Files
 
 Downloaded files are saved to the location selected by the user via the file save dialog. Currently, downloads create text files containing:
+
 - Repository information
 - Version
 - File name
