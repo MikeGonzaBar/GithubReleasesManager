@@ -1,6 +1,7 @@
 import { useState } from "react";
 import "./App.css";
 import TabNavigation from "./shared/components/TabNavigation";
+import { ToastProvider } from "./shared/components/ToastContainer";
 import RegisteredRepos from "./tabs/registered-repos/components/RegisteredRepos";
 import InstalledApps from "./tabs/installed-apps/components/InstalledApps";
 import About from "./tabs/about/components/About";
@@ -11,14 +12,16 @@ function App() {
   const [activeTab, setActiveTab] = useState<Tab>("repos");
 
   return (
-    <div className="app-container">
-      <TabNavigation activeTab={activeTab} onTabChange={setActiveTab} />
-      <main className="app-content">
-        {activeTab === "repos" && <RegisteredRepos />}
-        {activeTab === "installed" && <InstalledApps />}
-        {activeTab === "about" && <About />}
-      </main>
+    <ToastProvider>
+      <div className="app-container">
+        <TabNavigation activeTab={activeTab} onTabChange={setActiveTab} />
+        <main className="app-content">
+          {activeTab === "repos" && <RegisteredRepos />}
+          {activeTab === "installed" && <InstalledApps />}
+          {activeTab === "about" && <About />}
+        </main>
       </div>
+    </ToastProvider>
   );
 }
 

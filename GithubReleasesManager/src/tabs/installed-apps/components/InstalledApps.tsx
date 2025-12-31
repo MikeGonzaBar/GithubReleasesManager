@@ -1,10 +1,14 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { save, ask } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
+import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import "./InstalledApps.css";
 import { loadInstalledApps, saveInstalledApp } from "../../../shared/utils/storage";
 import { loadRegisteredRepos, isVersionNewer } from "../../../shared/utils/repos";
 import { getSuggestedDownloadPath, ensureFolderStructure } from "../../../shared/utils/download";
+import { getErrorMessage } from "../../../shared/utils/errorHandler";
+import { useToast } from "../../../shared/components/ToastContainer";
+import InstalledAppDetail from "./InstalledAppDetail";
 import type { InstalledApp, RegisteredRepo } from "../../../types";
 
 export default function InstalledApps() {
@@ -13,8 +17,10 @@ export default function InstalledApps() {
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [selectedApp, setSelectedApp] = useState<InstalledApp | null>(null);
+  const { showToast } = useToast();
 
-  const loadApps = async () => {
+  const loadApps = useCallback(async () => {
     try {
       setLoading(true);
       const [installedApps, repos] = await Promise.all([
@@ -25,21 +31,30 @@ export default function InstalledApps() {
       setRegisteredRepos(repos);
     } catch (error) {
       console.error("Failed to load installed apps:", error);
+      const errorMessage = getErrorMessage(error, "Failed to load installed apps");
+      showToast(errorMessage, "error");
     } finally {
       setLoading(false);
     }
-  };
+  }, [showToast]);
+
+  // Create a Map for O(1) lookups instead of O(n) find operations
+  const registeredReposMap = useMemo(() => {
+    const map = new Map<string, RegisteredRepo>();
+    registeredRepos.forEach(repo => {
+      map.set(`${repo.owner}/${repo.name}`, repo);
+    });
+    return map;
+  }, [registeredRepos]);
 
   const handleUpdate = async (app: InstalledApp, latestVersion: string) => {
     try {
       setUpdating(`${app.repo_owner}/${app.repo_name}`);
 
-      // Get the registered repo to get description
-      const registeredRepo = registeredRepos.find(
-        r => r.owner === app.repo_owner && r.name === app.repo_name
-      );
+      // Get the registered repo to get description - O(1) lookup
+      const registeredRepo = registeredReposMap.get(`${app.repo_owner}/${app.repo_name}`);
       if (!registeredRepo) {
-        alert("Repository not found in registered repos.");
+        showToast("Repository not found in registered repos.", "error");
         return;
       }
 
@@ -120,7 +135,8 @@ export default function InstalledApps() {
           console.error("Failed to delete old file:", error);
           // Still save the new app even if deletion fails
           await saveInstalledApp(newInstalledApp);
-          alert(`Update saved, but failed to delete old file: ${error}`);
+          const errorMessage = getErrorMessage(error, "Failed to delete old file");
+          showToast(`Update saved, but failed to delete old file: ${errorMessage}`, "error", 5000);
         }
       } else {
         // User chose to keep both - just add new entry
@@ -130,10 +146,11 @@ export default function InstalledApps() {
       // Reload apps to show updated list
       await loadApps();
 
-      alert("Update completed successfully!");
+      showToast("Update completed successfully!", "success");
     } catch (error) {
       console.error("Update failed:", error);
-      alert(`Update failed: ${error}`);
+      const errorMessage = getErrorMessage(error, "Update failed");
+      showToast(errorMessage, "error");
     } finally {
       setUpdating(null);
     }
@@ -166,25 +183,48 @@ export default function InstalledApps() {
       // Reload apps to show updated list
       await loadApps();
 
-      alert("App deleted successfully!");
+      showToast("App deleted successfully!", "success");
     } catch (error) {
       console.error("Delete failed:", error);
-      alert(`Failed to delete app: ${error}`);
+      const errorMessage = getErrorMessage(error, "Failed to delete app");
+      showToast(errorMessage, "error");
     } finally {
       setDeleting(null);
     }
   };
 
+  const handleOpenPath = useCallback(async (app: InstalledApp, e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      await revealItemInDir(app.download_path);
+    } catch (error) {
+      console.error("Failed to open file path:", error);
+      const errorMessage = getErrorMessage(error, "Failed to open file location");
+      showToast(errorMessage, "error");
+    }
+  }, [showToast]);
+
   // Load apps when component mounts
   useEffect(() => {
     loadApps();
-  }, []);
+  }, [loadApps]);
+
+  if (selectedApp) {
+    return (
+      <div className="tab-content installed-apps">
+        <InstalledAppDetail
+          app={selectedApp}
+          onBack={() => setSelectedApp(null)}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="tab-content installed-apps">
       <div className="content-header">
         <h2>Installed Applications</h2>
-        <button className="refresh-button" onClick={loadApps} disabled={loading}>
+        <button type="button" className="refresh-button" onClick={loadApps} disabled={loading}>
           {loading ? "Loading..." : "Refresh"}
         </button>
       </div>
@@ -200,11 +240,9 @@ export default function InstalledApps() {
             <p className="empty-state-hint">Applications you download will appear here.</p>
           </div>
         ) : (
-          apps.map((app, index) => {
-            // Find the registered repo to get latest version
-            const registeredRepo = registeredRepos.find(
-              r => r.owner === app.repo_owner && r.name === app.repo_name
-            );
+          apps.map((app) => {
+            // Find the registered repo to get latest version - O(1) lookup
+            const registeredRepo = registeredReposMap.get(`${app.repo_owner}/${app.repo_name}`);
             const latestVersion = registeredRepo?.latest_version || app.version;
             const hasUpdate = registeredRepo
               ? isVersionNewer(registeredRepo.latest_version, app.version)
@@ -212,7 +250,11 @@ export default function InstalledApps() {
             const versionsMatch = app.version === latestVersion;
 
             return (
-              <div key={index} className="app-card">
+              <div
+                key={`${app.repo_owner}-${app.repo_name}-${app.version}`}
+                className="app-card"
+                onClick={() => setSelectedApp(app)}
+              >
                 <div className="app-info">
                   <h3 className="app-name">{app.repo_owner}/{app.repo_name}</h3>
                   {app.description && (
@@ -231,10 +273,11 @@ export default function InstalledApps() {
                   </div>
                   <p className="download-path">Location: {app.download_path}</p>
                 </div>
-                <div className="app-actions">
+                <div className="app-actions" onClick={(e) => e.stopPropagation()}>
                   <div className="action-buttons">
                     {hasUpdate ? (
                       <button
+                        type="button"
                         className="update-button"
                         onClick={() => handleUpdate(app, latestVersion)}
                         disabled={updating === `${app.repo_owner}/${app.repo_name}` || deleting === `${app.repo_owner}/${app.repo_name}-${app.version}`}
@@ -245,6 +288,16 @@ export default function InstalledApps() {
                       <span className="status-text">Up to date</span>
                     )}
                     <button
+                      type="button"
+                      className="open-path-button"
+                      onClick={(e) => handleOpenPath(app, e)}
+                      title="Open file location in file explorer"
+                      aria-label="Open file location"
+                    >
+                      📂
+                    </button>
+                    <button
+                      type="button"
                       className="delete-button"
                       onClick={() => handleDelete(app)}
                       disabled={updating === `${app.repo_owner}/${app.repo_name}` || deleting === `${app.repo_owner}/${app.repo_name}-${app.version}`}

@@ -1,7 +1,10 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import "./RepositoryDetail.css";
 import VersionDetail from "./VersionDetail";
 import { fetchReleases } from "../../../shared/utils/github";
+import { updateRepoLastChecked } from "../../../shared/utils/repos";
+import { getErrorMessage } from "../../../shared/utils/errorHandler";
+import { useToast } from "../../../shared/components/ToastContainer";
 import type { Release, RegisteredRepo } from "../../../types";
 
 interface RepositoryDetailProps {
@@ -14,12 +17,9 @@ export default function RepositoryDetail({ repository, onBack }: RepositoryDetai
   const [releases, setReleases] = useState<Release[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const { showToast } = useToast();
 
-  useEffect(() => {
-    loadReleases();
-  }, [repository.owner, repository.name]);
-
-  const loadReleases = async () => {
+  const loadReleases = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
@@ -32,12 +32,21 @@ export default function RepositoryDetail({ repository, onBack }: RepositoryDetai
           return b.release_date.localeCompare(a.release_date);
         });
       setReleases(sortedReleases);
+
+      // Update last checked timestamp
+      await updateRepoLastChecked(repository.owner, repository.name);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load releases");
+      const errorMessage = getErrorMessage(err, "Failed to load releases");
+      setError(errorMessage);
+      showToast(errorMessage, "error");
     } finally {
       setLoading(false);
     }
-  };
+  }, [repository.owner, repository.name, showToast]);
+
+  useEffect(() => {
+    loadReleases();
+  }, [loadReleases]);
 
   if (selectedVersion) {
     return (
@@ -52,7 +61,7 @@ export default function RepositoryDetail({ repository, onBack }: RepositoryDetai
   return (
     <div className="repository-detail">
       <div className="detail-header">
-        <button className="back-button" onClick={onBack}>
+        <button type="button" className="back-button" onClick={onBack}>
           ← Back
         </button>
         <h2 className="detail-title">{repository.owner}/{repository.name}</h2>

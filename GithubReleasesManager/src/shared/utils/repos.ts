@@ -1,5 +1,6 @@
 // Utility for registered repositories
 import { invoke } from '@tauri-apps/api/core';
+import { VERSION_PRE_RELEASE_ORDER } from '../constants';
 import type { RegisteredRepo } from '../../types';
 
 // Load registered repositories from storage
@@ -36,6 +37,16 @@ export async function deleteRegisteredRepo(owner: string, name: string): Promise
 export async function findRegisteredRepo(owner: string, name: string): Promise<RegisteredRepo | undefined> {
   const repos = await loadRegisteredRepos();
   return repos.find((repo) => repo.owner === owner && repo.name === name);
+}
+
+// Update last checked timestamp for a repository
+export async function updateRepoLastChecked(owner: string, name: string): Promise<void> {
+  try {
+    await invoke('update_repo_last_checked', { owner, name });
+  } catch (error) {
+    console.error('Failed to update last checked:', error);
+    // Don't throw - this is a non-critical operation
+  }
 }
 
 // Parse version string into components
@@ -110,13 +121,7 @@ export function compareVersions(v1: string, v2: string): number {
     const pre2 = ver2.preRelease;
 
     // Common pre-release order: alpha < beta < rc < (none)
-    const preReleaseOrder: { [key: string]: number } = {
-      "alpha": 1,
-      "beta": 2,
-      "rc": 3,
-      "pre": 2,
-      "preview": 2,
-    };
+    const preReleaseOrder: { [key: string]: number } = VERSION_PRE_RELEASE_ORDER;
 
     const order1 = preReleaseOrder[pre1] || 0;
     const order2 = preReleaseOrder[pre2] || 0;

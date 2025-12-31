@@ -2,6 +2,8 @@ import { useState } from "react";
 import "./AddRepoDialog.css";
 import { parseGitHubUrl, fetchRepoInfo, fetchReleases } from "../../../shared/utils/github";
 import { saveRegisteredRepo } from "../../../shared/utils/repos";
+import { getErrorMessage } from "../../../shared/utils/errorHandler";
+import { useToast } from "../../../shared/components/ToastContainer";
 import type { RegisteredRepo } from "../../../types";
 
 interface AddRepoDialogProps {
@@ -14,6 +16,7 @@ export default function AddRepoDialog({ isOpen, onClose, onSuccess }: AddRepoDia
     const [url, setUrl] = useState("");
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const { showToast } = useToast();
 
     if (!isOpen) return null;
 
@@ -29,10 +32,11 @@ export default function AddRepoDialog({ isOpen, onClose, onSuccess }: AddRepoDia
             // Validate repository exists by fetching repo info
             const repoInfo = await fetchRepoInfo(owner, repo);
 
-            // Fetch releases to get the latest version
+            // Fetch releases to get the latest version and count
             const releases = await fetchReleases(owner, repo);
-            const latestVersion = releases.length > 0 && !releases[0].is_draft
-                ? releases[0].version
+            const nonDraftReleases = releases.filter(r => !r.is_draft);
+            const latestVersion = nonDraftReleases.length > 0
+                ? nonDraftReleases[0].version
                 : "No releases";
 
             // Create registered repo object
@@ -42,6 +46,9 @@ export default function AddRepoDialog({ isOpen, onClose, onSuccess }: AddRepoDia
                 description: repoInfo.description,
                 latest_version: latestVersion,
                 added_date: new Date().toISOString(),
+                avatar_url: repoInfo.avatar_url,
+                last_checked: new Date().toISOString(),
+                release_count: nonDraftReleases.length,
             };
 
             // Save to storage
@@ -52,8 +59,10 @@ export default function AddRepoDialog({ isOpen, onClose, onSuccess }: AddRepoDia
             setError(null);
             onSuccess();
             onClose();
+            showToast("Repository added successfully!", "success");
         } catch (err) {
-            setError(err instanceof Error ? err.message : "Failed to add repository");
+            const errorMessage = getErrorMessage(err, "Failed to add repository");
+            setError(errorMessage);
         } finally {
             setLoading(false);
         }
@@ -72,7 +81,7 @@ export default function AddRepoDialog({ isOpen, onClose, onSuccess }: AddRepoDia
             <div className="dialog-content" onClick={(e) => e.stopPropagation()}>
                 <div className="dialog-header">
                     <h2>Add Repository</h2>
-                    <button className="dialog-close" onClick={handleClose} disabled={loading}>
+                    <button type="button" className="dialog-close" onClick={handleClose} disabled={loading}>
                         ×
                     </button>
                 </div>

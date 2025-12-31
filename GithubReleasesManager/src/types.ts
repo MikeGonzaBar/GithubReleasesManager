@@ -13,6 +13,9 @@ export interface RegisteredRepo {
   description: string | null;
   latest_version: string;
   added_date: string;
+  avatar_url?: string;
+  last_checked?: string;
+  release_count?: number;
 }
 
 export interface Release {
@@ -46,6 +49,7 @@ export interface RepoInfo {
   name: string;
   owner: string;
   description: string | null;
+  avatar_url?: string;
 }
 
 export interface DownloadFile {

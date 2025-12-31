@@ -1,3 +1,4 @@
+import { useCallback, memo } from "react";
 import "./TabNavigation.css";
 
 type Tab = "repos" | "installed" | "about";
@@ -7,26 +8,43 @@ interface TabNavigationProps {
   onTabChange: (tab: Tab) => void;
 }
 
-export default function TabNavigation({ activeTab, onTabChange }: TabNavigationProps) {
+function TabNavigation({ activeTab, onTabChange }: TabNavigationProps) {
+  const handleTabChange = useCallback((tab: Tab) => {
+    onTabChange(tab);
+  }, [onTabChange]);
+
+  const reposIsActive = activeTab === "repos";
+  const installedIsActive = activeTab === "installed";
+  const aboutIsActive = activeTab === "about";
+
   return (
-    <nav className="tab-navigation">
+    <nav className="tab-navigation" role="tablist">
       <button
-        className={`tab-button ${activeTab === "repos" ? "active" : ""}`}
-        onClick={() => onTabChange("repos")}
+        type="button"
+        className={`tab-button ${reposIsActive ? "active" : ""}`}
+        onClick={() => handleTabChange("repos")}
+        role="tab"
+        {...(reposIsActive && { "aria-selected": "true" })}
       >
         <span className="tab-icon">📦</span>
         <span className="tab-label">Registered Repos</span>
       </button>
       <button
-        className={`tab-button ${activeTab === "installed" ? "active" : ""}`}
-        onClick={() => onTabChange("installed")}
+        type="button"
+        className={`tab-button ${installedIsActive ? "active" : ""}`}
+        onClick={() => handleTabChange("installed")}
+        role="tab"
+        {...(installedIsActive && { "aria-selected": "true" })}
       >
         <span className="tab-icon">💾</span>
         <span className="tab-label">Installed Apps</span>
       </button>
       <button
-        className={`tab-button ${activeTab === "about" ? "active" : ""}`}
-        onClick={() => onTabChange("about")}
+        type="button"
+        className={`tab-button ${aboutIsActive ? "active" : ""}`}
+        onClick={() => handleTabChange("about")}
+        role="tab"
+        {...(aboutIsActive && { "aria-selected": "true" })}
       >
         <span className="tab-icon">ℹ️</span>
         <span className="tab-label">About</span>
@@ -34,4 +52,6 @@ export default function TabNavigation({ activeTab, onTabChange }: TabNavigationP
     </nav>
   );
 }
+
+export default memo(TabNavigation);
 

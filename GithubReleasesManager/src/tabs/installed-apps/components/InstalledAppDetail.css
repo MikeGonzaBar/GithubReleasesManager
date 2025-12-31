@@ -1,0 +1,246 @@
+.installed-app-detail {
+  padding: 2rem;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.detail-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 2rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.back-button {
+  padding: 0.5rem 1rem;
+  background-color: var(--bg-secondary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-family: inherit;
+}
+
+.back-button:hover {
+  background-color: var(--bg-hover);
+  border-color: var(--accent-color);
+}
+
+.version-header-info {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.detail-title {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.version-tag {
+  padding: 0.25rem 0.75rem;
+  background-color: var(--accent-color);
+  color: white;
+  border-radius: 12px;
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.detail-content {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.app-info-section {
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.info-row {
+  display: flex;
+  align-items: flex-start;
+  margin-bottom: 1rem;
+  gap: 1rem;
+}
+
+.info-row:last-child {
+  margin-bottom: 0;
+}
+
+.info-label {
+  font-weight: 600;
+  color: var(--text-primary);
+  min-width: 120px;
+  flex-shrink: 0;
+}
+
+.info-value {
+  color: var(--text-secondary);
+  flex: 1;
+}
+
+.path-container {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+}
+
+.path-value {
+  word-break: break-all;
+  flex: 1;
+}
+
+.open-path-button {
+  background: none;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 4px 8px;
+  cursor: pointer;
+  font-size: 16px;
+  transition: all 0.2s;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.open-path-button:hover {
+  background: var(--bg-primary);
+  border-color: var(--accent-color);
+}
+
+.open-path-button:active {
+  transform: scale(0.95);
+}
+
+.version-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.version-section {
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.section-header {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem 1.5rem;
+  background: none;
+  border: none;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+  text-align: left;
+  font-family: inherit;
+}
+
+.section-header:hover {
+  background-color: var(--bg-hover);
+}
+
+.section-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.section-chevron {
+  transition: transform 0.2s ease;
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+}
+
+.section-chevron.open {
+  transform: rotate(180deg);
+}
+
+.section-content {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.3s ease;
+}
+
+.section-content.open {
+  max-height: 2000px;
+}
+
+.commits-list {
+  padding: 1rem 1.5rem;
+}
+
+.commit-item {
+  padding: 1rem;
+  margin-bottom: 0.75rem;
+  background-color: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+}
+
+.commit-item:last-child {
+  margin-bottom: 0;
+}
+
+.commit-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.commit-hash {
+  font-family: monospace;
+  font-size: 0.85rem;
+  color: var(--accent-color);
+  font-weight: 600;
+}
+
+.commit-author {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.commit-date {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.commit-message {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--text-primary);
+  line-height: 1.5;
+}
+
+.empty-message {
+  padding: 1rem 1.5rem;
+  text-align: center;
+  color: var(--text-secondary);
+  font-style: italic;
+  margin: 0;
+}
+
+.empty-message.error {
+  color: #f44336;
+  font-style: normal;
+}
+

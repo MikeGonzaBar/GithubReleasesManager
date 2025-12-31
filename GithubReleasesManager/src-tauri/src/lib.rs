@@ -443,6 +443,7 @@ struct GitHubRepoInfo {
 #[derive(Debug, Serialize, Deserialize)]
 struct RepoOwner {
     login: String,
+    avatar_url: Option<String>,
 }
 
 // Frontend-friendly structures
@@ -481,6 +482,7 @@ pub struct RepoInfo {
     pub name: String,
     pub owner: String,
     pub description: Option<String>,
+    pub avatar_url: Option<String>,
 }
 
 // Helper function to format file sizes
@@ -588,6 +590,7 @@ async fn fetch_github_repo_info(
         name: github_repo.name,
         owner: github_repo.owner.login,
         description: github_repo.description,
+        avatar_url: github_repo.owner.avatar_url,
     };
 
     // Store in cache
@@ -809,6 +812,12 @@ pub struct RegisteredRepo {
     pub description: Option<String>,
     pub latest_version: String,
     pub added_date: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub avatar_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_checked: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub release_count: Option<u32>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -915,6 +924,44 @@ fn delete_registered_repo(
     Ok(())
 }
 
+// Update last checked timestamp for a repository
+#[tauri::command]
+fn update_repo_last_checked(
+    app: tauri::AppHandle,
+    owner: String,
+    name: String,
+) -> Result<(), String> {
+    let file_path = get_registered_repos_file_path(&app);
+
+    // Load existing repos
+    let mut repos = if file_path.exists() {
+        let content = std::fs::read_to_string(&file_path)
+            .map_err(|e| format!("Failed to read file: {}", e))?;
+        serde_json::from_str::<RegisteredReposData>(&content)
+            .map_err(|e| format!("Failed to parse JSON: {}", e))?
+            .repos
+    } else {
+        return Ok(()); // No repos to update
+    };
+
+    // Update the repo's last_checked timestamp
+    if let Some(repo) = repos
+        .iter_mut()
+        .find(|r| r.owner == owner && r.name == name)
+    {
+        repo.last_checked = Some(chrono::Utc::now().to_rfc3339());
+    }
+
+    // Save updated repos list
+    let data = RegisteredReposData { repos };
+    let json = serde_json::to_string_pretty(&data)
+        .map_err(|e| format!("Failed to serialize JSON: {}", e))?;
+
+    std::fs::write(&file_path, json).map_err(|e| format!("Failed to write file: {}", e))?;
+
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -936,7 +983,8 @@ pub fn run() {
             fetch_release_commits,
             load_registered_repos,
             save_registered_repo,
-            delete_registered_repo
+            delete_registered_repo,
+            update_repo_last_checked
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

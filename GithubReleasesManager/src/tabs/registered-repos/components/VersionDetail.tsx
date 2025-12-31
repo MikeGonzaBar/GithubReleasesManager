@@ -1,11 +1,16 @@
-import { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { save } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
 import "./VersionDetail.css";
 import { saveInstalledApp } from "../../../shared/utils/storage";
 import { getSuggestedDownloadPath, ensureFolderStructure } from "../../../shared/utils/download";
 import { fetchReleaseCommits } from "../../../shared/utils/github";
+import { formatBytes } from "../../../shared/utils/format";
+import { getErrorMessage } from "../../../shared/utils/errorHandler";
+import { useToast } from "../../../shared/components/ToastContainer";
+import { useDownloadProgress, type DownloadProgress } from "../../../shared/hooks/useDownloadProgress";
+import { ReleaseNotesViewer } from "../../../shared/components/ReleaseNotesViewer";
+import { QuickActions } from "../../../shared/components/QuickActions";
 import type { InstalledApp, Release, Commit, ReleaseAsset, RegisteredRepo } from "../../../types";
 
 interface VersionDetailProps {
@@ -14,24 +19,8 @@ interface VersionDetailProps {
   onBack: () => void;
 }
 
-interface DownloadProgress {
-  file_name: string;
-  downloaded: number;
-  total: number;
-  progress: number;
-}
-
-// Helper function to format bytes
-const formatBytes = (bytes: number): string => {
-  if (bytes === 0) return "0 B";
-  const k = 1024;
-  const sizes = ["B", "KB", "MB", "GB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return `${(bytes / Math.pow(k, i)).toFixed(2)} ${sizes[i]}`;
-};
-
-// Progress bar component to avoid inline styles
-function ProgressBar({ progress }: { progress: DownloadProgress }) {
+// Progress bar component - memoized to prevent unnecessary re-renders
+const ProgressBar = React.memo(function ProgressBar({ progress }: { progress: DownloadProgress }) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -50,50 +39,19 @@ function ProgressBar({ progress }: { progress: DownloadProgress }) {
       </span>
     </div>
   );
-}
+});
 
 export default function VersionDetail({ repository, release, onBack }: VersionDetailProps) {
   const [commitsOpen, setCommitsOpen] = useState(false);
   const [downloadsOpen, setDownloadsOpen] = useState(false);
-  const [downloading, setDownloading] = useState<string | null>(null);
-  const [downloadProgress, setDownloadProgress] = useState<{ [key: string]: DownloadProgress }>({});
+  const [releaseNotesOpen, setReleaseNotesOpen] = useState(false);
   const [commits, setCommits] = useState<Commit[]>([]);
   const [commitsLoading, setCommitsLoading] = useState(false);
   const [commitsError, setCommitsError] = useState<string | null>(null);
+  const { showToast } = useToast();
+  const { downloading, setDownloading, downloadProgress, clearProgress } = useDownloadProgress();
 
-  // Listen for download progress events
-  useEffect(() => {
-    const setupProgressListener = async () => {
-      const unlisten = await listen<DownloadProgress>("download-progress", (event) => {
-        const progress = event.payload;
-        setDownloadProgress((prev) => ({
-          ...prev,
-          [progress.file_name]: progress,
-        }));
-      });
-      return unlisten;
-    };
-
-    let unlistenFn: (() => void) | undefined;
-    setupProgressListener().then((fn) => {
-      unlistenFn = fn;
-    });
-
-    return () => {
-      if (unlistenFn) {
-        unlistenFn();
-      }
-    };
-  }, []);
-
-  // Fetch commits when commits section is opened
-  useEffect(() => {
-    if (commitsOpen && commits.length === 0 && !commitsLoading && !commitsError) {
-      loadCommits();
-    }
-  }, [commitsOpen]);
-
-  const loadCommits = async () => {
+  const loadCommits = useCallback(async () => {
     try {
       setCommitsLoading(true);
       setCommitsError(null);
@@ -104,22 +62,27 @@ export default function VersionDetail({ repository, release, onBack }: VersionDe
       );
       setCommits(fetchedCommits);
     } catch (err) {
-      setCommitsError(err instanceof Error ? err.message : "Failed to load commits");
+      const errorMessage = getErrorMessage(err, "Failed to load commits");
+      setCommitsError(errorMessage);
     } finally {
       setCommitsLoading(false);
     }
-  };
+  }, [repository.owner, repository.name, release.version]);
+
+  // Fetch commits when commits section is opened
+  useEffect(() => {
+    if (commitsOpen && commits.length === 0 && !commitsLoading && !commitsError) {
+      loadCommits();
+    }
+  }, [commitsOpen, commits.length, commitsLoading, commitsError, loadCommits]);
 
   // Use assets from the release object
-  const downloadFiles: ReleaseAsset[] = release.assets || [];
+  const downloadFiles: ReleaseAsset[] = useMemo(() => release.assets || [], [release.assets]);
 
-  const handleDownload = async (asset: ReleaseAsset) => {
+  const handleDownload = useCallback(async (asset: ReleaseAsset) => {
     try {
       setDownloading(asset.name);
-      setDownloadProgress((prev) => ({
-        ...prev,
-        [asset.name]: { file_name: asset.name, downloaded: 0, total: asset.size, progress: 0 },
-      }));
+      // Progress will be set by the event listener
 
       // Get file extension from asset name
       const fileExtension = asset.name.split('.').pop() || '';
@@ -142,11 +105,7 @@ export default function VersionDetail({ repository, release, onBack }: VersionDe
       if (!filePath) {
         // User cancelled
         setDownloading(null);
-        setDownloadProgress((prev) => {
-          const newProgress = { ...prev };
-          delete newProgress[asset.name];
-          return newProgress;
-        });
+        clearProgress(asset.name);
         return;
       }
 
@@ -177,42 +136,56 @@ export default function VersionDetail({ repository, release, onBack }: VersionDe
       await saveInstalledApp(installedApp);
 
       // Clear progress
-      setDownloadProgress((prev) => {
-        const newProgress = { ...prev };
-        delete newProgress[asset.name];
-        return newProgress;
-      });
+      clearProgress(asset.name);
 
-      alert(`Download completed! File saved to: ${finalPath}`);
+      showToast(`Download completed! File saved to: ${finalPath}`, "success", 5000);
     } catch (error) {
       console.error("Download failed:", error);
-      alert(`Download failed: ${error}`);
-      setDownloadProgress((prev) => {
-        const newProgress = { ...prev };
-        delete newProgress[asset.name];
-        return newProgress;
-      });
+      const errorMessage = getErrorMessage(error, "Download failed");
+      showToast(errorMessage, "error");
+      clearProgress(asset.name);
     } finally {
       setDownloading(null);
     }
-  };
+  }, [repository, release, showToast, clearProgress]);
 
   return (
     <div className="version-detail">
       <div className="detail-header">
-        <button className="back-button" onClick={onBack}>
+        <button type="button" className="back-button" onClick={onBack}>
           ← Back
         </button>
         <div className="version-header-info">
           <h2 className="detail-title">{repository.owner}/{repository.name}</h2>
           <span className="version-tag">{release.version}</span>
         </div>
+        <QuickActions
+          repoOwner={repository.owner}
+          repoName={repository.name}
+          version={release.version}
+          onCopy={() => showToast("Copied to clipboard!", "success", 2000)}
+        />
       </div>
 
       <div className="detail-content">
         <div className="version-sections">
           <section className="version-section">
             <button
+              type="button"
+              className="section-header"
+              onClick={() => setReleaseNotesOpen(!releaseNotesOpen)}
+            >
+              <h3 className="section-title">Release Notes</h3>
+              <span className={`section-chevron ${releaseNotesOpen ? "open" : ""}`}>▼</span>
+            </button>
+            <div className={`section-content ${releaseNotesOpen ? "open" : ""}`}>
+              <ReleaseNotesViewer content={release.description} />
+            </div>
+          </section>
+
+          <section className="version-section">
+            <button
+              type="button"
               className="section-header"
               onClick={() => setCommitsOpen(!commitsOpen)}
             >
@@ -245,6 +218,7 @@ export default function VersionDetail({ repository, release, onBack }: VersionDe
 
           <section className="version-section">
             <button
+              type="button"
               className="section-header"
               onClick={() => setDownloadsOpen(!downloadsOpen)}
             >
@@ -268,6 +242,7 @@ export default function VersionDetail({ repository, release, onBack }: VersionDe
                           {isDownloading && progress && <ProgressBar progress={progress} />}
                         </div>
                         <button
+                          type="button"
                           className="download-button"
                           onClick={() => handleDownload(asset)}
                           disabled={isDownloading}
