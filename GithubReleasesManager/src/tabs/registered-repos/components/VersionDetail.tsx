@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { save } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -19,6 +19,37 @@ interface DownloadProgress {
   downloaded: number;
   total: number;
   progress: number;
+}
+
+// Helper function to format bytes
+const formatBytes = (bytes: number): string => {
+  if (bytes === 0) return "0 B";
+  const k = 1024;
+  const sizes = ["B", "KB", "MB", "GB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return `${(bytes / Math.pow(k, i)).toFixed(2)} ${sizes[i]}`;
+};
+
+// Progress bar component to avoid inline styles
+function ProgressBar({ progress }: { progress: DownloadProgress }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (containerRef.current) {
+      containerRef.current.style.setProperty('--progress', `${progress.progress}%`);
+    }
+  }, [progress.progress]);
+
+  return (
+    <div ref={containerRef} className="download-progress-container">
+      <div className="download-progress-bar">
+        <div className="download-progress-fill" />
+      </div>
+      <span className="download-progress-text">
+        {progress.progress}% ({formatBytes(progress.downloaded)} / {formatBytes(progress.total)})
+      </span>
+    </div>
+  );
 }
 
 export default function VersionDetail({ repository, release, onBack }: VersionDetailProps) {
@@ -81,15 +112,6 @@ export default function VersionDetail({ repository, release, onBack }: VersionDe
 
   // Use assets from the release object
   const downloadFiles: ReleaseAsset[] = release.assets || [];
-
-  // Helper function to format bytes
-  const formatBytes = (bytes: number): string => {
-    if (bytes === 0) return "0 B";
-    const k = 1024;
-    const sizes = ["B", "KB", "MB", "GB"];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return `${(bytes / Math.pow(k, i)).toFixed(2)} ${sizes[i]}`;
-  };
 
   const handleDownload = async (asset: ReleaseAsset) => {
     try {
@@ -243,19 +265,7 @@ export default function VersionDetail({ repository, release, onBack }: VersionDe
                         <div className="file-info">
                           <span className="file-name">{asset.name}</span>
                           <span className="file-size">{asset.size_formatted}</span>
-                          {isDownloading && progress && (
-                            <div className="download-progress-container">
-                              <div className="download-progress-bar">
-                                <div
-                                  className="download-progress-fill"
-                                  style={{ '--progress': `${progress.progress}%` } as React.CSSProperties}
-                                />
-                              </div>
-                              <span className="download-progress-text">
-                                {progress.progress}% ({formatBytes(progress.downloaded)} / {formatBytes(progress.total)})
-                              </span>
-                            </div>
-                          )}
+                          {isDownloading && progress && <ProgressBar progress={progress} />}
                         </div>
                         <button
                           className="download-button"

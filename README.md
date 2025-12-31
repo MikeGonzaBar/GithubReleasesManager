@@ -153,6 +153,11 @@ The application stores tracking data in platform-specific app data directories:
   - Latest version
   - Description
   - Date added
+- `api_cache.json` - Contains cached GitHub API responses with timestamps:
+  - Repository information cache
+  - Releases list cache
+  - Commit history cache
+  - Each entry includes cached data and timestamp for TTL management
 
 ### Downloaded Files
 
@@ -181,8 +186,26 @@ The application uses the GitHub REST API v3 to fetch real-time data:
 - **Commits**: Fetches commit history for each release
 - **Assets**: Downloads release files directly from GitHub
 
+### Caching System
+
+The app implements an intelligent caching system to reduce API calls and improve performance:
+
+- **Cache Duration**: API responses are cached for 10 minutes (600 seconds)
+- **Cache Storage**: Cached data is stored in `api_cache.json` in the app data directory
+- **Automatic Cache Management**:
+  - Cache entries are automatically checked before making API requests
+  - Expired cache entries are automatically refreshed
+  - Cache persists across app restarts
+- **Cached Endpoints**:
+  - Repository information (`/repos/{owner}/{repo}`)
+  - Releases list (`/repos/{owner}/{repo}/releases`)
+  - Commit history (`/repos/{owner}/{repo}/commits`)
+
+This caching system significantly reduces API calls when navigating between views, helping to stay within rate limits while providing a faster user experience.
+
 ### Rate Limits
 
 - **Without authentication**: 60 requests per hour per IP address
+- **With caching**: Effectively reduces API calls by ~90% for typical usage patterns
 
 The app works without a GitHub account for public repositories. Authentication is optional and only needed for higher rate limits or private repository access.

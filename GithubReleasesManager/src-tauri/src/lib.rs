@@ -295,6 +295,94 @@ fn update_installed_app(
 }
 
 // ============================================================================
+// GitHub API Cache System
+// ============================================================================
+
+// Cache entry with timestamp
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct CacheEntry<T> {
+    data: T,
+    cached_at: i64, // Unix timestamp
+}
+
+// Cache data structure
+#[derive(Debug, Serialize, Deserialize)]
+struct ApiCache {
+    repo_info: std::collections::HashMap<String, CacheEntry<RepoInfo>>,
+    releases: std::collections::HashMap<String, CacheEntry<Vec<Release>>>,
+    commits: std::collections::HashMap<String, CacheEntry<Vec<Commit>>>,
+}
+
+// Cache TTL in seconds (10 minutes)
+const CACHE_TTL_SECONDS: i64 = 600;
+
+// Get cache file path
+fn get_cache_file_path(app: &tauri::AppHandle) -> PathBuf {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .expect("Failed to get app data directory");
+    std::fs::create_dir_all(&app_data_dir).expect("Failed to create app data directory");
+    app_data_dir.join("api_cache.json")
+}
+
+// Load cache from file
+fn load_cache(app: &tauri::AppHandle) -> ApiCache {
+    let file_path = get_cache_file_path(app);
+
+    if !file_path.exists() {
+        return ApiCache {
+            repo_info: std::collections::HashMap::new(),
+            releases: std::collections::HashMap::new(),
+            commits: std::collections::HashMap::new(),
+        };
+    }
+
+    match std::fs::read_to_string(&file_path) {
+        Ok(content) => serde_json::from_str(&content).unwrap_or_else(|_| ApiCache {
+            repo_info: std::collections::HashMap::new(),
+            releases: std::collections::HashMap::new(),
+            commits: std::collections::HashMap::new(),
+        }),
+        Err(_) => ApiCache {
+            repo_info: std::collections::HashMap::new(),
+            releases: std::collections::HashMap::new(),
+            commits: std::collections::HashMap::new(),
+        },
+    }
+}
+
+// Save cache to file
+fn save_cache(app: &tauri::AppHandle, cache: &ApiCache) -> Result<(), String> {
+    let file_path = get_cache_file_path(app);
+    let json = serde_json::to_string_pretty(cache)
+        .map_err(|e| format!("Failed to serialize cache: {}", e))?;
+    std::fs::write(&file_path, json).map_err(|e| format!("Failed to write cache: {}", e))?;
+    Ok(())
+}
+
+// Check if cache entry is still valid
+fn is_cache_valid(cached_at: i64) -> bool {
+    let now = chrono::Utc::now().timestamp();
+    (now - cached_at) < CACHE_TTL_SECONDS
+}
+
+// Generate cache key for repo info
+fn repo_info_cache_key(owner: &str, repo: &str) -> String {
+    format!("{}:{}", owner, repo)
+}
+
+// Generate cache key for releases
+fn releases_cache_key(owner: &str, repo: &str) -> String {
+    format!("releases:{}:{}", owner, repo)
+}
+
+// Generate cache key for commits
+fn commits_cache_key(owner: &str, repo: &str, tag: &str) -> String {
+    format!("commits:{}:{}:{}", owner, repo, tag)
+}
+
+// ============================================================================
 // GitHub API Structures and Functions
 // ============================================================================
 
@@ -450,7 +538,22 @@ fn parse_github_url(url: String) -> Result<(String, String), String> {
 
 // Fetch repository info from GitHub API
 #[tauri::command]
-async fn fetch_github_repo_info(owner: String, repo: String) -> Result<RepoInfo, String> {
+async fn fetch_github_repo_info(
+    app: tauri::AppHandle,
+    owner: String,
+    repo: String,
+) -> Result<RepoInfo, String> {
+    let cache_key = repo_info_cache_key(&owner, &repo);
+
+    // Check cache first
+    let mut cache = load_cache(&app);
+    if let Some(entry) = cache.repo_info.get(&cache_key) {
+        if is_cache_valid(entry.cached_at) {
+            return Ok(entry.data.clone());
+        }
+    }
+
+    // Cache miss or expired, fetch from API
     let url = format!("https://api.github.com/repos/{}/{}", owner, repo);
 
     let client = reqwest::Client::new();
@@ -481,16 +584,43 @@ async fn fetch_github_repo_info(owner: String, repo: String) -> Result<RepoInfo,
         .await
         .map_err(|e| format!("Failed to parse response: {}", e))?;
 
-    Ok(RepoInfo {
+    let repo_info = RepoInfo {
         name: github_repo.name,
         owner: github_repo.owner.login,
         description: github_repo.description,
-    })
+    };
+
+    // Store in cache
+    cache.repo_info.insert(
+        cache_key,
+        CacheEntry {
+            data: repo_info.clone(),
+            cached_at: chrono::Utc::now().timestamp(),
+        },
+    );
+    save_cache(&app, &cache).ok();
+
+    Ok(repo_info)
 }
 
 // Fetch releases from GitHub API
 #[tauri::command]
-async fn fetch_github_releases(owner: String, repo: String) -> Result<Vec<Release>, String> {
+async fn fetch_github_releases(
+    app: tauri::AppHandle,
+    owner: String,
+    repo: String,
+) -> Result<Vec<Release>, String> {
+    let cache_key = releases_cache_key(&owner, &repo);
+
+    // Check cache first
+    let mut cache = load_cache(&app);
+    if let Some(entry) = cache.releases.get(&cache_key) {
+        if is_cache_valid(entry.cached_at) {
+            return Ok(entry.data.clone());
+        }
+    }
+
+    // Cache miss or expired, fetch from API
     let url = format!("https://api.github.com/repos/{}/{}/releases", owner, repo);
 
     let client = reqwest::Client::new();
@@ -548,16 +678,38 @@ async fn fetch_github_releases(owner: String, repo: String) -> Result<Vec<Releas
         })
         .collect();
 
+    // Store in cache
+    cache.releases.insert(
+        cache_key,
+        CacheEntry {
+            data: releases.clone(),
+            cached_at: chrono::Utc::now().timestamp(),
+        },
+    );
+    save_cache(&app, &cache).ok();
+
     Ok(releases)
 }
 
 // Fetch commits for a specific release
 #[tauri::command]
 async fn fetch_release_commits(
+    app: tauri::AppHandle,
     owner: String,
     repo: String,
     tag: String,
 ) -> Result<Vec<Commit>, String> {
+    let cache_key = commits_cache_key(&owner, &repo, &tag);
+
+    // Check cache first
+    let mut cache = load_cache(&app);
+    if let Some(entry) = cache.commits.get(&cache_key) {
+        if is_cache_valid(entry.cached_at) {
+            return Ok(entry.data.clone());
+        }
+    }
+
+    // Cache miss or expired, fetch from API
     // First, get the release to find the target commit
     let release_url = format!(
         "https://api.github.com/repos/{}/{}/releases/tags/{}",
@@ -632,6 +784,16 @@ async fn fetch_release_commits(
             }
         })
         .collect();
+
+    // Store in cache
+    cache.commits.insert(
+        cache_key,
+        CacheEntry {
+            data: commits.clone(),
+            cached_at: chrono::Utc::now().timestamp(),
+        },
+    );
+    save_cache(&app, &cache).ok();
 
     Ok(commits)
 }

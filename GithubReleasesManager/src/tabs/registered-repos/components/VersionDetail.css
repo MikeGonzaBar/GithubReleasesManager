@@ -275,6 +275,7 @@
 .download-progress-container {
   margin-top: 0.5rem;
   width: 100%;
+  --progress: 0%;
 }
 
 .download-progress-bar {
