@@ -4,8 +4,22 @@
  * Sanitize a string to be safe for use in file/folder names
  * Removes invalid characters for Windows, Linux, and macOS
  */
-function sanitizeFileName(str: string): string {
-  return str.replace(/[<>:"/\\|?*\x00-\x1F]/g, "_").trim();
+function sanitizeFileName(str: string, fallback = "download"): string {
+  const reservedWindowsNames = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i;
+  const sanitized = str
+    .replace(/[<>:"/\\|?*\x00-\x1F]/g, "_")
+    .trim()
+    .replace(/[. ]+$/g, "_");
+
+  if (!sanitized) {
+    return fallback;
+  }
+
+  if (reservedWindowsNames.test(sanitized)) {
+    return `${sanitized}_`;
+  }
+
+  return sanitized;
 }
 
 /**
@@ -13,7 +27,7 @@ function sanitizeFileName(str: string): string {
  * Format: {repo_owner}-{repo_name}
  */
 export function getRepoFolderName(owner: string, name: string): string {
-  return `${sanitizeFileName(owner)}-${sanitizeFileName(name)}`;
+  return `${sanitizeFileName(owner, "owner")}-${sanitizeFileName(name, "repo")}`;
 }
 
 /**
@@ -34,16 +48,17 @@ export function getSuggestedDownloadPath(
   
   // Extract extension
   const lastDot = sanitizedFileName.lastIndexOf(".");
-  const ext = lastDot !== -1 ? sanitizedFileName.substring(lastDot) : "";
-  const baseName = lastDot !== -1 
+  const hasExtension = lastDot > 0 && lastDot < sanitizedFileName.length - 1;
+  const ext = hasExtension ? sanitizedFileName.substring(lastDot) : "";
+  const baseName = hasExtension
     ? sanitizedFileName.substring(0, lastDot)
     : sanitizedFileName;
   
   // Build filename with version if provided
   let finalFileName = baseName;
-  if (version) {
+  if (version?.trim()) {
     // Remove 'v' prefix from version for cleaner filename
-    const cleanVersion = version.replace(/^v/i, "");
+    const cleanVersion = sanitizeFileName(version.replace(/^v/i, ""), "version");
     finalFileName = `${baseName}-${cleanVersion}`;
   }
   
@@ -68,7 +83,11 @@ export function ensureFolderStructure(
   // Extract directory and filename from selected path
   const lastSlash = normalizedPath.lastIndexOf('/');
   const dir = lastSlash !== -1 ? normalizedPath.substring(0, lastSlash) : '';
-  const selectedFileName = lastSlash !== -1 ? normalizedPath.substring(lastSlash + 1) : normalizedPath;
+  const selectedFileName = sanitizeFileName(
+    lastSlash !== -1 ? normalizedPath.substring(lastSlash + 1) : normalizedPath
+  );
+  const originalLastSlash = Math.max(selectedPath.lastIndexOf('/'), selectedPath.lastIndexOf('\\'));
+  const originalDir = originalLastSlash !== -1 ? selectedPath.substring(0, originalLastSlash) : '';
   
   // Check if folder structure already exists in the path
   if (dir.endsWith(folderName) || dir.includes(`/${folderName}/`) || dir === folderName) {
@@ -79,7 +98,7 @@ export function ensureFolderStructure(
   // Create folder structure in the selected directory
   // Use the original path separator style
   const separator = selectedPath.includes('\\') ? '\\' : '/';
-  const repoFolder = dir ? `${dir}${separator}${folderName}` : folderName;
+  const repoFolder = originalDir ? `${originalDir}${separator}${folderName}` : folderName;
   const finalPath = `${repoFolder}${separator}${selectedFileName}`;
   
   return finalPath;

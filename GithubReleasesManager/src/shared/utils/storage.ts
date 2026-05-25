@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { InstalledApp } from "../types";
+import type { InstalledApp } from "../../types";
 
 export async function loadInstalledApps(): Promise<InstalledApp[]> {
   try {

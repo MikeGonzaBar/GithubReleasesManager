@@ -61,6 +61,7 @@ $RECYCLE.BIN/
 **/src-tauri/target/
 **/src-tauri/gen/
 **/src-tauri/Cargo.lock
+**/.tauri/
 
 # Test coverage
 coverage/
@@ -71,6 +72,7 @@ coverage/
 *.tmp
 *.temp
 .cache/
+.codex-visual-review/
 *.log
 
 # User downloaded files (example files created during development)

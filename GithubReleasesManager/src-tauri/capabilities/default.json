@@ -11,6 +11,8 @@
     "dialog:allow-ask",
     "http:default",
     "http:allow-fetch",
+    "process:default",
+    "updater:default",
     "fs:default",
     "fs:allow-read-file",
     "fs:allow-write-file",

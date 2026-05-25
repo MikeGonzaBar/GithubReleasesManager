@@ -1,31 +1,37 @@
 {
   "name": "githubreleasesmanager",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "test": "node --test \"src/shared/utils/*.test.ts\"",
+    "test:frontend": "node --test \"src/shared/utils/*.test.ts\"",
+    "test:gui": "node tests/gui/run-gui-tests.mjs",
+    "test:rust": "cd .. && cargo test --manifest-path GithubReleasesManager/src-tauri/Cargo.toml",
     "preview": "vite preview",
     "tauri": "tauri"
   },
   "dependencies": {
-    "@tauri-apps/api": "^2",
-    "@tauri-apps/plugin-dialog": "^2.4.2",
-    "@tauri-apps/plugin-fs": "^2.4.4",
-    "@tauri-apps/plugin-http": "^2.5.4",
-    "@tauri-apps/plugin-opener": "^2",
+    "@tauri-apps/api": "^2.11.0",
+    "@tauri-apps/plugin-dialog": "^2.7.1",
+    "@tauri-apps/plugin-fs": "^2.5.1",
+    "@tauri-apps/plugin-http": "^2.5.9",
+    "@tauri-apps/plugin-opener": "^2.5.4",
+    "@tauri-apps/plugin-process": "^2.3.1",
+    "@tauri-apps/plugin-updater": "^2.10.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2",
+    "@tauri-apps/cli": "^2.11.2",
     "@types/react": "^18.3.1",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
     "typescript": "~5.6.2",
-    "vite": "^6.0.3"
+    "vite": "^6.4.2"
   }
 }

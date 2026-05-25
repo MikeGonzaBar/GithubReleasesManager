@@ -62,9 +62,95 @@ body {
   background-color: var(--bg-primary);
 }
 
+.self-update-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--border-color);
+  background: color-mix(in srgb, var(--accent-color) 12%, var(--bg-primary));
+}
+
+.self-update-copy {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 2px;
+}
+
+.self-update-copy strong {
+  color: var(--text-primary);
+  font-size: 0.95rem;
+  line-height: 1.3;
+}
+
+.self-update-copy span {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  line-height: 1.35;
+}
+
+.self-update-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+}
+
+.self-update-actions button {
+  min-width: 92px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 7px 12px;
+  font: inherit;
+  font-size: 0.85rem;
+  line-height: 1.2;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.self-update-actions button:disabled {
+  cursor: wait;
+  opacity: 0.75;
+}
+
+.self-update-primary {
+  border-color: var(--accent-color);
+  background: var(--accent-color);
+  color: #ffffff;
+}
+
+.self-update-primary:not(:disabled):hover {
+  background: var(--accent-hover);
+}
+
+.self-update-secondary {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+.self-update-secondary:not(:disabled):hover {
+  background: var(--bg-hover);
+}
+
 .tab-content {
   height: 100%;
   overflow-y: auto;
+}
+
+@media (max-width: 720px) {
+  .self-update-banner {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .self-update-actions {
+    width: 100%;
+  }
+
+  .self-update-actions button {
+    flex: 1;
+  }
 }
 
 /* Scrollbar styling */

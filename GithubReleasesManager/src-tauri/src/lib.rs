@@ -1,7 +1,7 @@
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tauri::{Emitter, Manager};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -151,6 +151,34 @@ async fn download_file(
     Ok(file_path)
 }
 
+// Create a local metadata file for update flows that do not have a release asset URL.
+#[tauri::command]
+fn create_download_file(
+    file_path: String,
+    repo_owner: String,
+    repo_name: String,
+    version: String,
+    file_name: String,
+) -> Result<String, String> {
+    if let Some(parent) = Path::new(&file_path).parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create directory: {}", e))?;
+    }
+
+    let content = format!(
+        "GitHub Releases Manager Download\n\nRepository: {}/{}\nVersion: {}\nFile: {}\nCreated: {}\n",
+        repo_owner,
+        repo_name,
+        version,
+        file_name,
+        chrono::Utc::now().to_rfc3339()
+    );
+
+    std::fs::write(&file_path, content).map_err(|e| format!("Failed to write file: {}", e))?;
+
+    Ok(file_path)
+}
+
 // Delete a file
 #[tauri::command]
 fn delete_file(file_path: String) -> Result<(), String> {
@@ -158,49 +186,62 @@ fn delete_file(file_path: String) -> Result<(), String> {
     Ok(())
 }
 
+fn is_ignorable_cleanup_file(name: &str) -> bool {
+    name.starts_with('.')
+        || name.eq_ignore_ascii_case("Thumbs.db")
+        || name.eq_ignore_ascii_case("Desktop.ini")
+}
+
+fn cleanup_parent_folder_if_no_user_files(parent_dir: &Path) -> Result<(), String> {
+    if !parent_dir.exists() || !parent_dir.is_dir() {
+        return Ok(());
+    }
+
+    let mut ignored_files = Vec::new();
+    let entries =
+        std::fs::read_dir(parent_dir).map_err(|e| format!("Failed to read folder: {}", e))?;
+
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("Failed to read folder entry: {}", e))?;
+        let file_type = entry
+            .file_type()
+            .map_err(|e| format!("Failed to read folder entry metadata: {}", e))?;
+
+        if !file_type.is_file() {
+            return Ok(());
+        }
+
+        let file_name = entry.file_name();
+        let file_name = file_name.to_string_lossy();
+        if is_ignorable_cleanup_file(&file_name) {
+            ignored_files.push(entry.path());
+        } else {
+            return Ok(());
+        }
+    }
+
+    for ignored_file in ignored_files {
+        std::fs::remove_file(&ignored_file)
+            .map_err(|e| format!("Failed to delete ignored file: {}", e))?;
+    }
+
+    std::fs::remove_dir(parent_dir).map_err(|e| format!("Failed to delete empty folder: {}", e))?;
+
+    Ok(())
+}
+
 // Delete a file and its parent folder if empty
 #[tauri::command]
 fn delete_file_and_cleanup_folder(file_path: String) -> Result<(), String> {
-    let path = std::path::Path::new(&file_path);
+    let path = Path::new(&file_path);
 
     // Delete the file
     if path.exists() {
         std::fs::remove_file(&file_path).map_err(|e| format!("Failed to delete file: {}", e))?;
     }
 
-    // Check if parent directory exists and is empty
     if let Some(parent_dir) = path.parent() {
-        if parent_dir.exists() {
-            // Check if directory is empty (only count files, ignore hidden/system files)
-            let mut has_files = false;
-            if let Ok(entries) = std::fs::read_dir(parent_dir) {
-                for entry in entries {
-                    if let Ok(entry) = entry {
-                        let entry_path = entry.path();
-                        // Only count regular files (not directories or hidden files)
-                        if entry_path.is_file() {
-                            if let Some(name) = entry_path.file_name() {
-                                let name_str = name.to_string_lossy();
-                                // Don't count hidden files or system files
-                                if !name_str.starts_with('.')
-                                    && name_str != "Thumbs.db"
-                                    && name_str != "Desktop.ini"
-                                {
-                                    has_files = true;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Delete folder if it's empty
-            if !has_files {
-                std::fs::remove_dir(parent_dir)
-                    .map_err(|e| format!("Failed to delete empty folder: {}", e))?;
-            }
-        }
+        cleanup_parent_folder_if_no_user_files(parent_dir)?;
     }
 
     Ok(())
@@ -382,6 +423,21 @@ fn commits_cache_key(owner: &str, repo: &str, tag: &str) -> String {
     format!("commits:{}:{}:{}", owner, repo, tag)
 }
 
+fn percent_encode_path_segment(segment: &str) -> String {
+    let mut encoded = String::new();
+
+    for byte in segment.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                encoded.push(byte as char);
+            }
+            _ => encoded.push_str(&format!("%{byte:02X}")),
+        }
+    }
+
+    encoded
+}
+
 // ============================================================================
 // GitHub API Structures and Functions
 // ============================================================================
@@ -487,7 +543,7 @@ pub struct RepoInfo {
 
 // Helper function to format file sizes
 fn format_size(bytes: u64) -> String {
-    const UNITS: [&str; 4] = ["B", "KB", "MB", "GB"];
+    const UNITS: [&str; 7] = ["B", "KB", "MB", "GB", "TB", "PB", "EB"];
     let mut size = bytes as f64;
     let mut unit_index = 0;
 
@@ -503,31 +559,67 @@ fn format_size(bytes: u64) -> String {
     }
 }
 
-// Parse GitHub URL to extract owner and repo
-#[tauri::command]
-fn parse_github_url(url: String) -> Result<(String, String), String> {
-    // Remove trailing slash
-    let url = url.trim_end_matches('/');
+fn validate_github_owner_repo(owner: &str, repo: &str) -> Result<(String, String), String> {
+    let owner_re = Regex::new(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$")
+        .map_err(|e| format!("Failed to build owner regex: {}", e))?;
+    let repo_re = Regex::new(r"^[A-Za-z0-9._-]+$")
+        .map_err(|e| format!("Failed to build repo regex: {}", e))?;
 
-    // Match various GitHub URL formats:
-    // https://github.com/owner/repo
-    // https://github.com/owner/repo/
-    // git@github.com:owner/repo.git
-    // owner/repo
-
-    if let Ok(re) = Regex::new(r"github\.com[:/]([^/]+)/([^/]+?)(?:\.git)?/?$") {
-        if let Some(caps) = re.captures(&url) {
-            if let (Some(owner), Some(repo)) = (caps.get(1), caps.get(2)) {
-                return Ok((owner.as_str().to_string(), repo.as_str().to_string()));
-            }
-        }
+    if !owner_re.is_match(owner) || !repo_re.is_match(repo) {
+        return Err(
+            "Invalid GitHub URL format. Expected: https://github.com/owner/repo or owner/repo"
+                .to_string(),
+        );
     }
 
-    // Try simple owner/repo format
-    if let Ok(re) = Regex::new(r"^([^/]+)/([^/]+)$") {
-        if let Some(caps) = re.captures(&url) {
+    Ok((owner.to_string(), repo.to_string()))
+}
+
+fn parse_github_owner_repo(input: &str) -> Result<(String, String), String> {
+    let value = input.trim();
+    let value = value
+        .split(['?', '#'])
+        .next()
+        .unwrap_or(value)
+        .trim_end_matches('/');
+
+    if value.is_empty() {
+        return Err(
+            "Invalid GitHub URL format. Expected: https://github.com/owner/repo or owner/repo"
+                .to_string(),
+        );
+    }
+
+    let github_url_re =
+        Regex::new(r"^(?:https?://)?(?:www\.)?github\.com/([^/\s]+)/([^/\s]+?)(?:\.git)?(?:/(.*))?$")
+            .map_err(|e| format!("Failed to build URL regex: {}", e))?;
+    if let Some(caps) = github_url_re.captures(value) {
+        let owner = caps.get(1).map(|m| m.as_str()).unwrap_or_default();
+        let repo = caps.get(2).map(|m| m.as_str()).unwrap_or_default();
+        if let Some(path) = caps.get(3).map(|m| m.as_str()) {
+            let allowed_release_path = path == "releases" || path.starts_with("releases/");
+            if !allowed_release_path {
+                return Err(
+                    "GitHub releases are tracked at the repository level. Use a repository URL like https://github.com/owner/repo, not a branch, file, or folder URL."
+                        .to_string(),
+                );
+            }
+        }
+
+        return validate_github_owner_repo(owner, repo);
+    }
+
+    let patterns = [
+        r"^ssh://git@github\.com/([^/\s]+)/([^/\s]+?)(?:\.git)?/?$",
+        r"^git@github\.com:([^/\s]+)/([^/\s]+?)(?:\.git)?/?$",
+        r"^([^/\s]+)/([^/\s]+?)(?:\.git)?$",
+    ];
+
+    for pattern in patterns {
+        let re = Regex::new(pattern).map_err(|e| format!("Failed to build URL regex: {}", e))?;
+        if let Some(caps) = re.captures(value) {
             if let (Some(owner), Some(repo)) = (caps.get(1), caps.get(2)) {
-                return Ok((owner.as_str().to_string(), repo.as_str().to_string()));
+                return validate_github_owner_repo(owner.as_str(), repo.as_str());
             }
         }
     }
@@ -536,6 +628,12 @@ fn parse_github_url(url: String) -> Result<(String, String), String> {
         "Invalid GitHub URL format. Expected: https://github.com/owner/repo or owner/repo"
             .to_string(),
     )
+}
+
+// Parse GitHub URL to extract owner and repo
+#[tauri::command]
+fn parse_github_url(url: String) -> Result<(String, String), String> {
+    parse_github_owner_repo(&url)
 }
 
 // Fetch repository info from GitHub API
@@ -714,9 +812,10 @@ async fn fetch_release_commits(
 
     // Cache miss or expired, fetch from API
     // First, get the release to find the target commit
+    let encoded_tag = percent_encode_path_segment(&tag);
     let release_url = format!(
         "https://api.github.com/repos/{}/{}/releases/tags/{}",
-        owner, repo, tag
+        owner, repo, encoded_tag
     );
 
     let client = reqwest::Client::new();
@@ -747,13 +846,18 @@ async fn fetch_release_commits(
 
     // Get commits for the release
     // For simplicity, we'll get the last 30 commits
-    let commits_url = format!(
-        "https://api.github.com/repos/{}/{}/commits?sha={}&per_page=30",
-        owner, repo, release_info.target_commitish
-    );
+    let mut commits_url = reqwest::Url::parse(&format!(
+        "https://api.github.com/repos/{}/{}/commits",
+        owner, repo
+    ))
+    .map_err(|e| format!("Failed to build commits URL: {}", e))?;
+    commits_url
+        .query_pairs_mut()
+        .append_pair("sha", &release_info.target_commitish)
+        .append_pair("per_page", "30");
 
     let commits_response = client
-        .get(&commits_url)
+        .get(commits_url)
         .header("User-Agent", "GithubReleasesManager/1.0")
         .header("Accept", "application/vnd.github.v3+json")
         .send()
@@ -962,6 +1066,213 @@ fn update_repo_last_checked(
     Ok(())
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn unique_temp_dir(test_name: &str) -> PathBuf {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock should be after Unix epoch")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "githubreleasesmanager-{}-{}-{}",
+            test_name,
+            std::process::id(),
+            timestamp
+        ));
+        fs::create_dir_all(&path).expect("failed to create temp test dir");
+        path
+    }
+
+    #[test]
+    fn format_size_handles_unit_boundaries() {
+        assert_eq!(format_size(0), "0 B");
+        assert_eq!(format_size(1), "1 B");
+        assert_eq!(format_size(1023), "1023 B");
+        assert_eq!(format_size(1024), "1.00 KB");
+        assert_eq!(format_size(1536), "1.50 KB");
+        assert_eq!(format_size(1024_u64.pow(2)), "1.00 MB");
+        assert_eq!(format_size(1024_u64.pow(3)), "1.00 GB");
+        assert_eq!(format_size(1024_u64.pow(4)), "1.00 TB");
+    }
+
+    #[test]
+    fn parse_github_url_accepts_common_repository_forms() {
+        let cases = [
+            ("https://github.com/owner/repo", ("owner", "repo")),
+            ("http://github.com/owner/repo/", ("owner", "repo")),
+            ("https://www.github.com/owner/repo.git", ("owner", "repo")),
+            (
+                "https://github.com/owner/repo/releases/tag/v1.0.0?expanded=true",
+                ("owner", "repo"),
+            ),
+            ("git@github.com:owner/repo.git", ("owner", "repo")),
+            ("ssh://git@github.com/owner/repo.git", ("owner", "repo")),
+            ("owner/repo", ("owner", "repo")),
+            ("owner/repo.git", ("owner", "repo")),
+            (" Owner-123/repo.name_1 ", ("Owner-123", "repo.name_1")),
+        ];
+
+        for (input, expected) in cases {
+            assert_eq!(
+                parse_github_url(input.to_string()).unwrap(),
+                (expected.0.to_string(), expected.1.to_string()),
+                "input should parse: {input}"
+            );
+        }
+    }
+
+    #[test]
+    fn parse_github_url_rejects_invalid_or_ambiguous_forms() {
+        let cases = [
+            "",
+            "owner",
+            "owner/repo/extra",
+            "https://github.com/owner",
+            "https://notgithub.com/owner/repo",
+            "https://github.com/-owner/repo",
+            "https://github.com/owner-/repo",
+            "https://github.com/owner/re po",
+            "https://github.com/owner/",
+            "https://github.com/qarmin/czkawka/tree/master/krokiet",
+            "https://github.com/owner/repo/blob/main/README.md",
+        ];
+
+        for input in cases {
+            assert!(
+                parse_github_url(input.to_string()).is_err(),
+                "input should be rejected: {input}"
+            );
+        }
+    }
+
+    #[test]
+    fn cache_validity_respects_ttl_boundary() {
+        let now = chrono::Utc::now().timestamp();
+        assert!(is_cache_valid(now));
+        assert!(is_cache_valid(now - CACHE_TTL_SECONDS + 1));
+        assert!(!is_cache_valid(now - CACHE_TTL_SECONDS));
+        assert!(!is_cache_valid(now - CACHE_TTL_SECONDS - 1));
+    }
+
+    #[test]
+    fn cache_keys_include_expected_namespace_parts() {
+        assert_eq!(repo_info_cache_key("owner", "repo"), "owner:repo");
+        assert_eq!(releases_cache_key("owner", "repo"), "releases:owner:repo");
+        assert_eq!(
+            commits_cache_key("owner", "repo", "v1.0.0"),
+            "commits:owner:repo:v1.0.0"
+        );
+    }
+
+    #[test]
+    fn percent_encode_path_segment_encodes_tag_special_characters() {
+        assert_eq!(percent_encode_path_segment("v1.0.0"), "v1.0.0");
+        assert_eq!(
+            percent_encode_path_segment("release/v1.0.0+build 1"),
+            "release%2Fv1.0.0%2Bbuild%201"
+        );
+    }
+
+    #[test]
+    fn delete_file_and_cleanup_folder_removes_empty_parent() {
+        let root = unique_temp_dir("cleanup-empty-parent");
+        let file_path = root.join("app.exe");
+        fs::write(&file_path, b"payload").expect("failed to write test file");
+
+        delete_file_and_cleanup_folder(file_path.to_string_lossy().to_string()).unwrap();
+
+        assert!(!file_path.exists());
+        assert!(!root.exists());
+    }
+
+    #[test]
+    fn delete_file_and_cleanup_folder_keeps_parent_with_visible_sibling_file() {
+        let root = unique_temp_dir("cleanup-visible-sibling");
+        let file_path = root.join("app.exe");
+        let sibling_path = root.join("keep.txt");
+        fs::write(&file_path, b"payload").expect("failed to write test file");
+        fs::write(&sibling_path, b"keep").expect("failed to write sibling file");
+
+        delete_file_and_cleanup_folder(file_path.to_string_lossy().to_string()).unwrap();
+
+        assert!(!file_path.exists());
+        assert!(sibling_path.exists());
+        assert!(root.exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn delete_file_and_cleanup_folder_keeps_parent_with_child_directory() {
+        let root = unique_temp_dir("cleanup-child-dir");
+        let file_path = root.join("app.exe");
+        let child_dir = root.join("nested");
+        fs::write(&file_path, b"payload").expect("failed to write test file");
+        fs::create_dir_all(&child_dir).expect("failed to create child dir");
+
+        delete_file_and_cleanup_folder(file_path.to_string_lossy().to_string()).unwrap();
+
+        assert!(!file_path.exists());
+        assert!(child_dir.exists());
+        assert!(root.exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn delete_file_and_cleanup_folder_removes_ignored_files_then_parent() {
+        let root = unique_temp_dir("cleanup-ignored-files");
+        let file_path = root.join("app.exe");
+        let dot_file = root.join(".DS_Store");
+        let thumbs = root.join("Thumbs.db");
+        let desktop = root.join("Desktop.ini");
+        fs::write(&file_path, b"payload").expect("failed to write test file");
+        fs::write(&dot_file, b"ignored").expect("failed to write dot file");
+        fs::write(&thumbs, b"ignored").expect("failed to write thumbs file");
+        fs::write(&desktop, b"ignored").expect("failed to write desktop file");
+
+        delete_file_and_cleanup_folder(file_path.to_string_lossy().to_string()).unwrap();
+
+        assert!(!file_path.exists());
+        assert!(!root.exists());
+    }
+
+    #[test]
+    fn delete_file_reports_missing_files() {
+        let root = unique_temp_dir("delete-missing-file");
+        let missing_path = root.join("missing.exe");
+
+        let err = delete_file(missing_path.to_string_lossy().to_string()).unwrap_err();
+
+        assert!(err.starts_with("Failed to delete file:"));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn create_download_file_writes_metadata_and_creates_parent_dirs() {
+        let root = unique_temp_dir("create-download-file");
+        let file_path = root.join("owner-repo").join("repo-1.2.3.txt");
+
+        let returned_path = create_download_file(
+            file_path.to_string_lossy().to_string(),
+            "owner".to_string(),
+            "repo".to_string(),
+            "1.2.3".to_string(),
+            "repo-1.2.3.txt".to_string(),
+        )
+        .unwrap();
+
+        let content = fs::read_to_string(&file_path).expect("metadata file should exist");
+        assert_eq!(returned_path, file_path.to_string_lossy());
+        assert!(content.contains("Repository: owner/repo"));
+        assert!(content.contains("Version: 1.2.3"));
+        assert!(content.contains("File: repo-1.2.3.txt"));
+        let _ = fs::remove_dir_all(root);
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -969,10 +1280,13 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             load_installed_apps,
             save_installed_app,
             download_file,
+            create_download_file,
             delete_file,
             delete_file_and_cleanup_folder,
             delete_installed_app,

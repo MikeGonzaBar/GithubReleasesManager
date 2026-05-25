@@ -99,6 +99,9 @@ export default function AddRepoDialog({ isOpen, onClose, onSuccess }: AddRepoDia
                             required
                             autoFocus
                         />
+                        <p className="dialog-hint">
+                            Releases are tracked for the whole repository. Branch, file, and folder URLs are not supported.
+                        </p>
                         {error && <div className="dialog-error">{error}</div>}
                     </div>
 
